@@ -1,0 +1,10 @@
+data/
+outputs/
+.env
+.venv/
+__pycache__/
+data/
+outputs/
+.env
+.venv/
+__pycache__/

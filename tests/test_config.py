@@ -47,3 +47,17 @@ def test_unknown_key_in_fold_rejected(tmp_path):
     )
     with pytest.raises(ValueError, match=r"bar.*split\.folds\[1\]"):
         load_t1_config(bad)
+
+
+def test_config_has_experiment_section(tmp_path):
+    exp = load_t1_config("configs/t1.yaml").experiment
+    assert exp.outlier_threshold == 0.15
+    assert exp.w_grid == pytest.approx([i / 10 for i in range(11)])
+    assert exp.phi_grid == [0, 0.25, 0.5, 0.75, 1]
+    assert exp.small_threshold == 200 and exp.n_bootstrap == 2000
+    assert exp.output.name == "experiments.csv" and exp.grid_output.name == "t1_grid.csv"
+    src = open("configs/t1.yaml", encoding="utf-8").read()
+    bad = tmp_path / "t1.yaml"
+    bad.write_text(src.replace("  n_bootstrap:", "  foo: 1\n  n_bootstrap:"), encoding="utf-8")
+    with pytest.raises(ValueError, match="foo"):
+        load_t1_config(bad)

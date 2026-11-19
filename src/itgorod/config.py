@@ -24,12 +24,24 @@ class T1Paths:
 
 
 @dataclass(frozen=True)
+class T1Experiment:
+    outlier_threshold: float
+    w_grid: list[float]
+    phi_grid: list[float]
+    small_threshold: float
+    n_bootstrap: int
+    output: Path
+    grid_output: Path
+
+
+@dataclass(frozen=True)
 class T1Config:
     seed: int
     paths: T1Paths
     folds: list[Fold]
     target_year: int
     fallback: str
+    experiment: T1Experiment | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +97,7 @@ def _folds(items: list[dict]) -> list[Fold]:
 
 
 def load_t1_config(path: str | Path) -> T1Config:
-    raw = _load(path, {"seed", "paths", "split", "target_year", "placeholder"})
+    raw = _load(path, {"seed", "paths", "split", "target_year", "placeholder", "experiment"})
     _check_keys(raw["split"], {"folds"}, "split")
     _check_keys(raw["placeholder"], {"fallback"}, "placeholder")
     path_keys = {"train", "test", "sample", "output"}
@@ -95,6 +107,24 @@ def load_t1_config(path: str | Path) -> T1Config:
         folds=_folds(raw["split"]["folds"]),
         target_year=raw["target_year"],
         fallback=raw["placeholder"]["fallback"],
+        experiment=_experiment(raw["experiment"]) if "experiment" in raw else None,
+    )
+
+
+def _experiment(d: dict) -> T1Experiment:
+    keys = {f for f in T1Experiment.__dataclass_fields__}
+    _check_keys(d, keys, "experiment")
+    missing = keys - set(d)
+    if missing:
+        raise ValueError(f"Missing config key(s) {sorted(missing)} in experiment")
+    return T1Experiment(
+        outlier_threshold=float(d["outlier_threshold"]),
+        w_grid=[float(x) for x in d["w_grid"]],
+        phi_grid=[float(x) for x in d["phi_grid"]],
+        small_threshold=float(d["small_threshold"]),
+        n_bootstrap=int(d["n_bootstrap"]),
+        output=_resolve(d["output"]),
+        grid_output=_resolve(d["grid_output"]),
     )
 
 

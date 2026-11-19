@@ -1,4 +1,4 @@
-.PHONY: install lint format test t1 t2-prepare-smoke t2-smoke validate check-time-split ci
+.PHONY: install lint format test t1 t1-experiment t2-prepare-smoke t2-smoke validate check-time-split ci
 
 install:
 	uv sync
@@ -16,6 +16,9 @@ test:
 
 t1:
 	uv run itgorod t1 predict --config configs/t1.yaml
+
+t1-experiment:
+	uv run itgorod t1 experiment --config configs/t1.yaml
 
 t2-prepare-smoke:
 	uv run itgorod t2 prepare --config configs/t2.yaml --smoke

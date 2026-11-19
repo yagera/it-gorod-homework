@@ -8,6 +8,7 @@ import pandas as pd
 from itgorod.config import load_t1_config, load_t2_config
 from itgorod.data import build_t2_cache, read_t1, read_t2_codes
 from itgorod.t1 import TARGET, run_t1
+from itgorod.t1_experiment import run_t1_experiment
 from itgorod.t2 import run_t2_smoke
 from itgorod.validation import (
     LeakageError,
@@ -24,6 +25,13 @@ from itgorod.validation import (
 
 def _cmd_t1_predict(args) -> int:
     print(f"written: {run_t1(load_t1_config(args.config))}")
+    return 0
+
+
+def _cmd_t1_experiment(args) -> int:
+    cfg = load_t1_config(args.config)
+    run_t1_experiment(cfg)
+    print(f"written: {cfg.experiment.output}, {cfg.experiment.grid_output}")
     return 0
 
 
@@ -99,6 +107,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = t1.add_parser("predict")
     p.add_argument("--config", default="configs/t1.yaml")
     p.set_defaults(func=_cmd_t1_predict)
+    p = t1.add_parser("experiment")
+    p.add_argument("--config", default="configs/t1.yaml")
+    p.set_defaults(func=_cmd_t1_experiment)
 
     t2 = sub.add_parser("t2").add_subparsers(dest="action", required=True)
     for name, func in (("prepare", _cmd_t2_prepare), ("train-predict", _cmd_t2_train_predict)):

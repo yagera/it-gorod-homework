@@ -198,3 +198,28 @@ def stack_constancy(train: pd.DataFrame, test: pd.DataFrame) -> dict:
         "test_matches_train": float(match.mean()),
         "depts_per_stack": train.drop_duplicates("department_id")["tech_stack"].value_counts(),
     }
+
+
+def projects_elasticity(df: pd.DataFrame, n_boot: int, seed: int) -> dict:
+    """α в log y = log r_отдела + α·log(projects): внутриотдельное центрирование (фиксированные
+    эффекты), МНК без свободного члена; 95% CI — бутстрэп по отделам. Описательная проверка."""
+    d = df[(df[TARGET] > 0) & (df["active_projects_count"] > 0)]
+    ly, lx = np.log(d[TARGET]), np.log(d["active_projects_count"])
+    g = d["department_id"]
+    y = (ly - ly.groupby(g).transform("mean")).to_numpy()
+    x = (lx - lx.groupby(g).transform("mean")).to_numpy()
+    codes, depts = pd.factorize(g)
+    xy, xx = np.bincount(codes, x * y), np.bincount(codes, x * x)  # суммы по отделам
+    rng = np.random.default_rng(seed)
+    boot = []
+    for _ in range(n_boot):
+        pick = rng.integers(0, len(depts), len(depts))
+        boot.append(xy[pick].sum() / xx[pick].sum())
+    lo, hi = np.percentile(boot, [2.5, 97.5])
+    return {
+        "alpha": float(xy.sum() / xx.sum()),
+        "ci_lo": float(lo),
+        "ci_hi": float(hi),
+        "n_rows": len(d),
+        "n_depts": len(depts),
+    }

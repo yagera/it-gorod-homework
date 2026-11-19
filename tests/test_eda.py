@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from itgorod import eda
 from itgorod.config import Fold
@@ -91,3 +92,39 @@ def test_stack_constancy():
     test = df[df["year"] == 2023].assign(year=2024)
     sc = eda.stack_constancy(df, test)
     assert sc["n_depts_multi_stack"] == 0 and sc["test_matches_train"] == 1.0
+
+
+def _elastic_frame(alpha: float, n_depts: int = 30, noise: float = 0.01) -> pd.DataFrame:
+    rng = np.random.default_rng(1)
+    rows = []
+    for d in range(n_depts):
+        r = rng.uniform(10, 40)
+        for y in range(2020, 2024):
+            proj = rng.uniform(5, 300)
+            rows.append(
+                {
+                    "department_id": d,
+                    "year": y,
+                    "active_projects_count": proj,
+                    eda.TARGET: r * proj**alpha * np.exp(rng.normal(0, noise)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_elasticity_recovers_alpha():
+    res = eda.projects_elasticity(_elastic_frame(1.2), n_boot=300, seed=0)
+    assert abs(res["alpha"] - 1.2) < 0.02
+    assert res["ci_lo"] < 1.2 < res["ci_hi"]
+    assert res["n_depts"] == 30 and res["n_rows"] == 120
+
+
+def test_elasticity_one_for_pure_ratio():
+    assert eda.projects_elasticity(_frame(), n_boot=50, seed=0)["alpha"] == pytest.approx(
+        1, abs=1e-9
+    )
+
+
+def test_elasticity_deterministic():
+    df = _elastic_frame(0.9)
+    assert eda.projects_elasticity(df, 100, 3) == eda.projects_elasticity(df, 100, 3)

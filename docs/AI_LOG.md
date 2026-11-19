@@ -126,3 +126,11 @@
 - Файлы: src/itgorod/cli.py, tests/test_cli.py, tests/test_validation.py, .claude/skills/time-split-check/SKILL.md, .claude/skills/validate-submission/SKILL.md, README.md, docs/DECISIONS.md, docs/AI_LOG.md
 - Проверка: два теста для (7) сначала падали (`FileNotFoundError`), после правки `make ci` → 63 passed, ruff чист. Тест для (9) прошёл сразу — код уже отвергал числовой `code`; чтобы проверить, что тест что-то охраняет, временно убрал `isinstance`-проверку → тест упал с `TypeError`, код возвращён. `make validate` → OK 505 / OK 10001; `itgorod validate t1 outputs/nope.csv` → ERROR, exit 2
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — T1: EDA (ветка feat/task1)
+- Запрос: ветка feat/task1, EDA T1 как notebooks/01_t1_eda.py (ячейки `# %%`), логика в src/itgorod, графики в docs/figures/, 6 гипотез, 5–7 выводов в DECISIONS.md.
+- Модель/агент: Sonnet (код, EDA), субагент `reviewer` (Opus) — ревью; правки по ревью внесены (тесты на утечку valid-года, сравнение моделей на общих строках, недостающие печати, противоречие п.5/п.6).
+- Что сделано: `src/itgorod/eda.py` (качество, таргет, ratio, тождества, дрейф, tech_stack, диагностика по временным фолдам), `read_t1_raw`, скрипт EDA с 5 графиками, запись 7 в DECISIONS (7 выводов). Главное: target ≈ ratio_отдела × active_projects_count (медианный CV ratio внутри отдела 2,3%); диагностический MAPE 2,8–3,5% против 4,4–6,2% у лага таргета; есть точные тождества budget=1,2·staff·salary и turnover=(hired+fired)/staff; сильный дрейф только у avg_dev_salary (+8,6%).
+- Файлы: src/itgorod/eda.py, src/itgorod/data.py, notebooks/01_t1_eda.py, tests/test_eda.py, docs/DECISIONS.md, docs/figures/t1_*.png (5 шт.), docs/AI_LOG.md
+- Проверка: `uv run ruff format . && uv run ruff check .` → ок; `uv run pytest -q` → 70 passed; `uv run python notebooks/01_t1_eda.py` → выполняется, 5 графиков сохранены; `make check-time-split` → оба фолда и признаки 2024 OK.
+- Что исправил человек: TODO(German)

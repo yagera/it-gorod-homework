@@ -62,3 +62,11 @@
 - Файлы: src/itgorod/validation.py, src/itgorod/metrics.py, tests/conftest.py, tests/test_time_split.py, tests/test_metrics.py, docs/AI_LOG.md
 - Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 35 passed (по одному тесту на каждый фолд); ruff чистый
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 4: чтение T1 и плейсхолдер
+- Запрос: продолжить с Task 4 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `data.read_t1` (выбрасывает пустую строку, int-типы), `t1.predict_placeholder` (значение 2023 → последнее известное по отделу → медиана 2023 по `tech_stack` → общая медиана; перед расчётом `assert_features_for_year`), `t1.run_t1` (порядок как в sample, папка вывода создаётся). Это плейсхолдер, не бейзлайн
+- Файлы: src/itgorod/data.py, src/itgorod/t1.py, tests/test_t1.py, docs/AI_LOG.md
+- Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 43 passed; ruff чистый
+- Что исправил человек: TODO(German)

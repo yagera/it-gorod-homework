@@ -10,3 +10,11 @@ split:
     - {train_max_year: 2022, valid_year: 2023}
 target_year: 2024
 placeholder: {fallback: tech_stack_median}
+experiment:
+  outlier_threshold: 0.15
+  w_grid: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  phi_grid: [0, 0.25, 0.5, 0.75, 1]
+  small_threshold: 200
+  n_bootstrap: 2000
+  output: outputs/experiments.csv
+  grid_output: outputs/t1_grid.csv

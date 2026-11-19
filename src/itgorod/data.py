@@ -67,3 +67,8 @@ def build_t2_cache(
 def read_t2_codes(path: str | Path) -> set[str]:
     """Допустимые коды — все уникальные `code` train (читается только эта колонка)."""
     return set(pq.read_table(path, columns=["code"]).column("code").to_pylist())
+
+
+def read_t1_raw(path: str | Path) -> pd.DataFrame:
+    """CSV T1 как есть (с пустыми строками и float-ключами) — только для EDA-проверок качества."""
+    return pd.read_csv(path)

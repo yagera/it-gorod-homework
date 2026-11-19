@@ -24,7 +24,7 @@ def t2_codes() -> set[str]:
 
 @pytest.fixture
 def t1_frame() -> pd.DataFrame:
-    """10 отделов × 2020–2023; у dept 1 все таргеты NaN, у dept 2 NaN в 2023."""
+    """10 отделов × 2020–2023, проекты постоянны; у dept 1 таргеты NaN, у dept 2 NaN в 2023."""
     stacks = ["Парк", "Метро", "Пляж"]
     rows = []
     for d in range(10):
@@ -39,6 +39,7 @@ def t1_frame() -> pd.DataFrame:
                     "tech_stack": stacks[d % 3],
                     "yearly_cv_processed": target,
                     "current_staff_count": 100 + d,
+                    "active_projects_count": 10.0 + d,
                 }
             )
     return pd.DataFrame(rows)

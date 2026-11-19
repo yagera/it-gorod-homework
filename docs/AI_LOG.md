@@ -94,3 +94,11 @@
 - Файлы: src/itgorod/cli.py, src/itgorod/__init__.py, Makefile, tests/test_cli.py, docs/AI_LOG.md
 - Проверка: тесты CLI сначала падали (ошибка импорта); `make ci` → ruff чист, 60 passed. `make t1` + `itgorod validate t1` → OK, 505 строк; `make check-time-split` → оба фолда OK и признаки 2024 OK; `make t2-prepare-smoke` (пик памяти ≈ 0.87 ГБ, 2.4 с) и `make t2-smoke` (пик ≈ 1.5 ГБ, 25 с) + `itgorod validate t2 outputs/task-2.smoke.csv` → OK, 10001 строка. `data/`, `outputs/` в git не попали
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 8: pre-commit и CI
+- Запрос: продолжить с Task 8 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `.pre-commit-config.yaml` (ruff-check --fix, ruff-format, gitleaks, check-added-large-files 1000 КБ, end-of-file-fixer, trailing-whitespace, check-yaml; версии — актуальные теги из `git ls-remote`), минимальный `.github/workflows/ci.yml` (job lint-test: `uv sync --frozen --no-group dl`, ruff, pytest; job gitleaks с `fetch-depth: 0`). Решение: `gitleaks-action` оставлен на `@v2` (по спеке), хотя уже есть `v3` — его поведение не проверял
+- Файлы: .pre-commit-config.yaml, .github/workflows/ci.yml, docs/AI_LOG.md
+- Проверка: `uv run pre-commit run --all-files` → все 7 хуков Passed; имитация CI (`uv sync --frozen --no-group dl` + ruff + pytest) → 60 passed; workflow YAML парсится. Реальный запуск CI на GitHub не проверялся (нужен push — по отдельной команде)
+- Что исправил человек: TODO(German)

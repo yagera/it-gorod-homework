@@ -8,6 +8,7 @@ import pandas as pd
 from scipy.stats import ks_2samp
 
 from itgorod.config import Fold
+from itgorod.t1 import BASELINE, predict_ratio
 from itgorod.validation import assert_no_time_leakage, split_fold
 
 TARGET = "yearly_cv_processed"
@@ -200,26 +201,168 @@ def stack_constancy(train: pd.DataFrame, test: pd.DataFrame) -> dict:
     }
 
 
-def projects_elasticity(df: pd.DataFrame, n_boot: int, seed: int) -> dict:
-    """α в log y = log r_отдела + α·log(projects): внутриотдельное центрирование (фиксированные
-    эффекты), МНК без свободного члена; 95% CI — бутстрэп по отделам. Описательная проверка."""
+def _fe_sums(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, int, int]:
+    """Суммы по отделам для МНК log y ~ log projects с фиксированными эффектами отдела:
+    (Σxy, Σxx по отделам, число строк, число отделов)."""
     d = df[(df[TARGET] > 0) & (df["active_projects_count"] > 0)]
     ly, lx = np.log(d[TARGET]), np.log(d["active_projects_count"])
     g = d["department_id"]
     y = (ly - ly.groupby(g).transform("mean")).to_numpy()
     x = (lx - lx.groupby(g).transform("mean")).to_numpy()
     codes, depts = pd.factorize(g)
-    xy, xx = np.bincount(codes, x * y), np.bincount(codes, x * x)  # суммы по отделам
+    return np.bincount(codes, x * y), np.bincount(codes, x * x), len(d), len(depts)
+
+
+def _slope(xy: np.ndarray, xx: np.ndarray) -> float:
+    return float(xy.sum() / xx.sum()) if xx.sum() > 0 else float("nan")
+
+
+def elasticity_alpha(df: pd.DataFrame) -> float:
+    """Точечная оценка α (NaN, если проекты внутри отделов не меняются)."""
+    xy, xx, _, _ = _fe_sums(df)
+    return _slope(xy, xx)
+
+
+def projects_elasticity(df: pd.DataFrame, n_boot: int, seed: int) -> dict:
+    """α в log y = log r_отдела + α·log(projects): внутриотдельное центрирование (фиксированные
+    эффекты), МНК без свободного члена; 95% CI — бутстрэп по отделам. Описательная проверка."""
+    xy, xx, n_rows, n_depts = _fe_sums(df)
+    if n_depts == 0:
+        return {"alpha": np.nan, "ci_lo": np.nan, "ci_hi": np.nan, "n_rows": 0, "n_depts": 0}
     rng = np.random.default_rng(seed)
     boot = []
     for _ in range(n_boot):
-        pick = rng.integers(0, len(depts), len(depts))
-        boot.append(xy[pick].sum() / xx[pick].sum())
-    lo, hi = np.percentile(boot, [2.5, 97.5])
+        pick = rng.integers(0, n_depts, n_depts)
+        boot.append(_slope(xy[pick], xx[pick]))
+    lo, hi = np.nanpercentile(boot, [2.5, 97.5]) if not np.isnan(boot).all() else (np.nan,) * 2
     return {
-        "alpha": float(xy.sum() / xx.sum()),
+        "alpha": _slope(xy, xx),
         "ci_lo": float(lo),
         "ci_hi": float(hi),
-        "n_rows": len(d),
-        "n_depts": len(depts),
+        "n_rows": n_rows,
+        "n_depts": n_depts,
     }
+
+
+# ---------------------------------------------------------------------------
+# Разбор малых значений таргета: где и почему ошибается планка «ratio за последний год × проекты».
+
+
+def last_year_rows(df: pd.DataFrame, fold: Fold) -> pd.DataFrame:
+    """Строки valid-года фолда с известным таргетом и прогнозом планки. Колонки `p_*` (последний
+    год train с ratio: год, проекты, таргет, ratio) и `pred` считаются только по train-годам;
+    таргет valid-года входит лишь в `y`, `ratio`, `ape`, `dly`, `dlr` (оценка, не прогноз)."""
+    d = add_ratio(df)
+    tr, va = split_fold(d, fold)
+    assert_no_time_leakage(tr, va)
+    last = tr.dropna(subset=["ratio"]).sort_values("year").groupby("department_id").tail(1)
+    last = last.set_index("department_id")
+    v = va[va[TARGET].notna()].set_index("department_id")
+    out = pd.DataFrame(
+        {
+            "y": v[TARGET],
+            "proj": v["active_projects_count"],
+            "staff": v["current_staff_count"],
+            "ratio": v["ratio"],
+            "p_year": last["year"].reindex(v.index),
+            "p_proj": last["active_projects_count"].reindex(v.index),
+            "p_y": last[TARGET].reindex(v.index),
+            "p_ratio": last["ratio"].reindex(v.index),
+        }
+    )
+    out["pred"] = out["p_ratio"] * out["proj"]
+    out["ape"] = (out["pred"] - out["y"]).abs() / out["y"]
+    out["dlp"] = np.log(out["proj"] / out["p_proj"])
+    out["dly"] = np.log(out["y"] / out["p_y"])
+    out["dlr"] = np.log(out["ratio"] / out["p_ratio"])
+    return out.dropna(subset=["pred"]).reset_index()
+
+
+def small_rows(df: pd.DataFrame, fold: Fold, threshold: float = 200) -> pd.DataFrame:
+    rows = last_year_rows(df, fold)
+    return rows[rows["y"] < threshold].reset_index(drop=True)
+
+
+def _group_labels(values: pd.Series, bins: list[float]) -> pd.Series:
+    labels = [f"({lo:g}, {hi:g}]" for lo, hi in zip(bins[:-1], bins[1:], strict=True)]
+    return pd.cut(values, bins, labels=labels, include_lowest=True)
+
+
+def _dept_group(df: pd.DataFrame, bins: list[float]) -> pd.Series:
+    """Группа размера отдела по среднему числу проектов в строках с ratio (общее правило для
+    `elasticity_by_size` и `predict_elastic`, чтобы печатаемые α были теми, что применяются)."""
+    h = add_ratio(df).dropna(subset=["ratio"])
+    return _group_labels(h.groupby("department_id")["active_projects_count"].mean(), bins)
+
+
+def elasticity_by_size(
+    df: pd.DataFrame, max_year: int, bins: list[float], n_boot: int, seed: int
+) -> pd.DataFrame:
+    """H1 (intercept ⇒ α < 1 у малых): α по группам отделов по среднему числу проектов,
+    по годам <= max_year (train-годы фолда)."""
+    t = df[df["year"] <= max_year]
+    group = _dept_group(t, bins)
+    rows = []
+    for label in group.cat.categories:
+        ids = group.index[group == label]
+        if len(ids) == 0:
+            continue
+        r = projects_elasticity(t[t["department_id"].isin(ids)], n_boot, seed)
+        rows.append(
+            {
+                "group": label,
+                **{k: r[k] for k in ("n_depts", "n_rows", "alpha")},
+                "ci_lo": r["ci_lo"],
+                "ci_hi": r["ci_hi"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def dept_intercepts(df: pd.DataFrame, min_points: int = 4) -> pd.DataFrame:
+    """H1 напрямую: по отделу МНК y = a + b·projects. `a_rel` = a / среднее y, `t` = a / se(a).
+    Описательно, по всем годам (не прогноз); по 4 точкам мощность низкая."""
+    rows = []
+    for did, g in df.dropna(subset=[TARGET, "active_projects_count"]).groupby("department_id"):
+        x, y = g["active_projects_count"].to_numpy(), g[TARGET].to_numpy()
+        if len(g) < min_points or len(np.unique(x)) < 3:
+            continue
+        b, a = np.polyfit(x, y, 1)
+        sxx = ((x - x.mean()) ** 2).sum()
+        rss = ((y - a - b * x) ** 2).sum()
+        se_a = np.sqrt(rss / (len(x) - 2) * (1 / len(x) + x.mean() ** 2 / sxx))
+        rows.append(
+            {
+                "department_id": did,
+                "mean_proj": x.mean(),
+                "a_rel": a / y.mean(),
+                "t": a / se_a if se_a > 0 else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def predict_elastic(
+    history: pd.DataFrame, rows: pd.DataFrame, bins: list[float] | None = None
+) -> pd.Series:
+    """Кандидат-поправка (H1): y_last · (proj / p_proj)^α, α — FE-эластичность по history.
+    `bins=None` — одна α на всех; иначе α по группам отделов (среднее число проектов в history).
+    При α = 1 совпадает с планкой. Отделы без истории — как у планки (fallback-цепочка)."""
+    ratio = predict_ratio(history, rows, BASELINE)  # заодно проверяет правило A
+    h = add_ratio(history).dropna(subset=["ratio"]).sort_values("year")
+    by_dept = h.groupby("department_id")["active_projects_count"]
+    p_proj, ids = by_dept.last(), rows["department_id"]
+    if bins is None:
+        alpha = pd.Series(elasticity_alpha(history), index=ids.index)
+    else:
+        group = _dept_group(history, bins)
+        alpha_by_group = {
+            g: elasticity_alpha(history[history["department_id"].isin(group.index[group == g])])
+            for g in group.cat.categories
+        }
+        alpha = ids.map(group).map(alpha_by_group).astype(float)
+    alpha = alpha.fillna(1.0)
+    proj = rows["active_projects_count"]
+    factor = (proj / ids.map(p_proj)) ** (alpha - 1.0)
+    factor = factor.where(np.isfinite(factor), 1.0)  # проекты = 0 или нет истории
+    return (ratio * proj * factor).rename(TARGET)

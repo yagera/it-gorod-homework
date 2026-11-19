@@ -78,3 +78,11 @@
 - Файлы: src/itgorod/data.py, tests/conftest.py, tests/test_t2_data.py, docs/AI_LOG.md
 - Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 49 passed; ruff чистый. Реальный train, `limit=5000`, `batch_size=500`, `max_chars=5000`: 5000 строк, пик памяти ≈ 770 МБ, 2.6 с. Наблюдение: parquet из одной row group, для полного train (этап T2) пик памяти надо перемерить
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 6: smoke-пайплайн T2
+- Запрос: продолжить с Task 6 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `t2.py` — `build_model` (TfidfVectorizer + LogisticRegression, параметры и `random_state` из конфига), `run_t2_smoke` (кэш → fit на smoke-подвыборке → предсказание всего test → `outputs/task-2.smoke.csv`, порядок как в sample, `code` строкой), `run_t2_full` (NotImplementedError «полный прогон — на этапе T2»); тест воспроизводимости T1 и T2
+- Файлы: src/itgorod/t2.py, tests/test_t2.py, tests/test_reproducibility.py, docs/AI_LOG.md
+- Проверка: `test_t2.py` сначала падал (ошибка импорта), затем `uv run pytest -q` → 54 passed; ruff чистый. `test_t1_reproducible` прошёл сразу — `run_t1` уже существовал с Task 4, так что RED для него не наблюдался
+- Что исправил человек: TODO(German)

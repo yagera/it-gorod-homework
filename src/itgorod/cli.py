@@ -5,7 +5,7 @@ import sys
 
 import pandas as pd
 
-from itgorod.config import load_t1_config, load_t2_config
+from itgorod.config import REPO_ROOT, load_t1_config, load_t2_config
 from itgorod.data import build_t2_cache, read_t1, read_t2_codes
 from itgorod.t1 import TARGET, run_t1
 from itgorod.t1_experiment import run_t1_experiment
@@ -48,6 +48,22 @@ def _cmd_t2_train_predict(args) -> int:
         print("полный прогон — на этапе T2 (пока доступен только --smoke)")
         return 2
     print(f"written (smoke): {run_t2_smoke(cfg, force=args.force)}")
+    return 0
+
+
+def _cmd_t2_experiment(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded, default_grid, run_experiments
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        run_experiments(
+            cfg, default_grid(), out / "t2_experiments.csv", out / "t2_per_class.csv", args.limit
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_experiments.csv'}, {out / 't2_per_class.csv'}")
     return 0
 
 
@@ -118,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--smoke", action="store_true")
         p.add_argument("--force", action="store_true")
         p.set_defaults(func=func)
+
+    p = t2.add_parser("experiment")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.add_argument("--limit", type=int, default=None, help="первые N строк train (отладка)")
+    p.set_defaults(func=_cmd_t2_experiment)
 
     p = sub.add_parser("validate")
     p.add_argument("task", choices=["t1", "t2"])

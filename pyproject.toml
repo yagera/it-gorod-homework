@@ -1,12 +1,10 @@
 [project]
 name = "itgorod"
 version = "0.1.0"
-description = "Add your description here"
+description = "ДЗ ML-стажировки ДИТ Москвы: T1 (регрессия, MAPE) и T2 (классификация, Macro-F1)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "catboost>=1.2.10",
-    "lightgbm>=4.7.0",
     "matplotlib>=3.11.2",
     "numpy>=2.4.6",
     "pandas>=3.1.1",
@@ -14,9 +12,6 @@ dependencies = [
     "pyyaml>=6.0.3",
     "scikit-learn>=1.9.1",
     "seaborn>=0.13.2",
-    "sentence-transformers>=6.3.0",
-    "torch>=2.15.0",
-    "transformers>=5.23.0",
 ]
 
 [project.scripts]
@@ -33,3 +28,24 @@ dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.5",
 ]
+# Тяжёлые ML-пакеты (CUDA и т.п.); CI ставит окружение с --no-group dl
+dl = [
+    "catboost>=1.2.10",
+    "lightgbm>=4.7.0",
+    "sentence-transformers>=6.3.0",
+    "torch>=2.15.0",
+    "transformers>=5.23.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "dl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

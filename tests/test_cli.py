@@ -77,3 +77,20 @@ def test_no_command_exits_nonzero():
     with pytest.raises(SystemExit) as exc:
         main([])
     assert exc.value.code != 0
+
+
+def test_validate_missing_csv_returns_2_with_message(tmp_path, t1_frame, capsys):
+    config = _t1_config(tmp_path, _t1_files(tmp_path, t1_frame))
+    missing = str(tmp_path / "nope.csv")
+    assert main(["validate", "t1", missing, "--config", config]) == 2
+    out = capsys.readouterr().out
+    assert "not found" in out and "nope.csv" in out
+
+
+def test_validate_missing_sample_returns_2(tmp_path, t1_frame, capsys):
+    paths = _t1_files(tmp_path, t1_frame)
+    main(["t1", "predict", "--config", _t1_config(tmp_path, paths)])
+    paths["sample"] = str(tmp_path / "gone-sample.csv")
+    config = _t1_config(tmp_path, paths)
+    assert main(["validate", "t1", paths["output"], "--config", config]) == 2
+    assert "gone-sample.csv" in capsys.readouterr().out

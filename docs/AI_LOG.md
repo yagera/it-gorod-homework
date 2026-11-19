@@ -118,3 +118,11 @@
 - Файлы: docs/DECISIONS.md, docs/EXPERIMENTS.md, README.md, notebooks/.gitkeep, AGENTS.md, docs/AI_LOG.md
 - Проверка: `make lint` чист, `make test` → 60 passed, `make t1`, `make t2-prepare-smoke`, `make t2-smoke`, `make validate` (OK 505 / OK 10001 строк), `make check-time-split` (оба фолда и признаки 2024 OK), `pre-commit run --all-files` → 7 хуков Passed, имитация CI (`--frozen --no-group dl`) → 60 passed; `data/` и `outputs/` игнорируются. Ревью ветки: Critical и Important не найдено; 11 замечаний уровня Minor отложены (список — в ответе пользователю), правок кода по ним не вносилось
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Исправления по ревью ветки (замечания 9, 7, 1, 8)
+- Запрос: исправить замечания 9, 7, 1 и 8; тесты сначала; остальные (2–6, 10, 11) — в DECISIONS.md блоком «Известные ограничения скелета», без правок
+- Модель/агент: Sonnet 5.5
+- Что сделано: (7) `itgorod validate` при отсутствующем файле сабмишна/sample/train печатает `ERROR: file not found: <путь>` и возвращает 2 (1 — только нарушения формата); (9) тест на `code`, прочитанный как число; (1) скилл `time-split-check` и README честно описывают, что проверяет `check-time-split` и что нет (утечки через признаки не ловит); (8) скилл `validate-submission`: число строк берётся из sample, а не зашито; блок «Известные ограничения скелета» (замечания 2–6, 10, 11) в `docs/DECISIONS.md`
+- Файлы: src/itgorod/cli.py, tests/test_cli.py, tests/test_validation.py, .claude/skills/time-split-check/SKILL.md, .claude/skills/validate-submission/SKILL.md, README.md, docs/DECISIONS.md, docs/AI_LOG.md
+- Проверка: два теста для (7) сначала падали (`FileNotFoundError`), после правки `make ci` → 63 passed, ruff чист. Тест для (9) прошёл сразу — код уже отвергал числовой `code`; чтобы проверить, что тест что-то охраняет, временно убрал `isinstance`-проверку → тест упал с `TypeError`, код возвращён. `make validate` → OK 505 / OK 10001; `itgorod validate t1 outputs/nope.csv` → ERROR, exit 2
+- Что исправил человек: TODO(German)

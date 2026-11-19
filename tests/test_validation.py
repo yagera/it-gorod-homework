@@ -124,3 +124,13 @@ def test_t2_rejects_unicode_digits_even_if_allowed(t2_sample, t2_codes, code):
     sub.loc[2, "code"] = code
     with pytest.raises(SubmissionError, match="NNN.NNN.NNN"):
         validate_t2_submission(sub, t2_sample, allowed)
+
+
+def test_t2_rejects_code_parsed_as_number(tmp_path, t2_sample, t2_codes):
+    # типичная ошибка: pd.read_csv без dtype=str превращает числовой code в int64
+    path = tmp_path / "numeric.csv"
+    path.write_text("row_id,code\n" + "".join(f"{i},10\n" for i in range(1, 21)), encoding="utf-8")
+    sub = pd.read_csv(path)
+    assert sub["code"].dtype.kind == "i"
+    with pytest.raises(SubmissionError, match="NNN.NNN.NNN"):
+        validate_t2_submission(sub, t2_sample, t2_codes)

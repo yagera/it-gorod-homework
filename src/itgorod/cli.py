@@ -44,6 +44,15 @@ def _cmd_t2_train_predict(args) -> int:
 
 
 def _cmd_validate(args) -> int:
+    try:
+        return _validate(args)
+    except FileNotFoundError as exc:
+        # код 2 — «не удалось проверить»; код 1 зарезервирован за нарушениями формата
+        print(f"ERROR: file not found: {exc.filename}")
+        return 2
+
+
+def _validate(args) -> int:
     sub = read_submission_csv(args.csv)
     try:
         if args.task == "t1":

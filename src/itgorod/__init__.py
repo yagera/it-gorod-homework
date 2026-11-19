@@ -1,2 +1,7 @@
+import sys
+
+
 def main() -> None:
-    print("Hello from itgorod!")
+    from itgorod.cli import main as cli_main
+
+    sys.exit(cli_main())

@@ -1,0 +1,12 @@
+seed: 42
+paths:
+  train: data/raw/task1/df_ITs_train.csv
+  test: data/raw/task1/df_ITs_test.csv
+  sample: data/raw/task1/sample_submission.csv
+  output: outputs/task-1.csv
+split:
+  folds:
+    - {train_max_year: 2021, valid_year: 2022}
+    - {train_max_year: 2022, valid_year: 2023}
+target_year: 2024
+placeholder: {fallback: tech_stack_median}

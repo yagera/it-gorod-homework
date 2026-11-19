@@ -110,3 +110,11 @@
 - Файлы: .claude/settings.json, .claude/agents/reviewer.md, .claude/agents/explorer.md, .claude/skills/validate-submission/SKILL.md, .claude/skills/time-split-check/SKILL.md, CLAUDE.md, docs/DECISIONS.md, docs/AI_LOG.md
 - Проверка: `jq . .claude/settings.json` валиден; хук на `src/itgorod/seed.py` → exit 0. Первая версия explorer с `disallowedTools` получила только Read/Grep/Glob (без Bash) — убрано. Вторая проба до перезагрузки агентов — Bash всё ещё нет (определение не перечитано). После `/reload-plugins`: `uv run python -I -c "import pyarrow"` выполнен (26.0.1), `rm` отклонён агентом по контракту, файл цел
 - Что исправил человек: TODO(German) (перезагрузил агентов; выбрал вариант без `disallowedTools`)
+
+## 2026-11-19 — Task 10: документация, финальная проверка и ревью ветки
+- Запрос: продолжить с Task 10 плана
+- Модель/агент: Sonnet 5.5; ревью всей ветки — субагент `reviewer` (opus, только чтение)
+- Что сделано: `docs/DECISIONS.md` (записи 1–6: без Hydra/MLflow/DVC/Docker, правило A и фолды, единый CLI, валидация T2 — TBD, группа `dl` и минимальный CI, ограничения explorer), `docs/EXPERIMENTS.md` (две строки: `t1-placeholder`, `t2-smoke` — не бейзлайны), `README.md`, `notebooks/.gitkeep`, поправлена устаревшая строка в `AGENTS.md`
+- Файлы: docs/DECISIONS.md, docs/EXPERIMENTS.md, README.md, notebooks/.gitkeep, AGENTS.md, docs/AI_LOG.md
+- Проверка: `make lint` чист, `make test` → 60 passed, `make t1`, `make t2-prepare-smoke`, `make t2-smoke`, `make validate` (OK 505 / OK 10001 строк), `make check-time-split` (оба фолда и признаки 2024 OK), `pre-commit run --all-files` → 7 хуков Passed, имитация CI (`--frozen --no-group dl`) → 60 passed; `data/` и `outputs/` игнорируются. Ревью ветки: Critical и Important не найдено; 11 замечаний уровня Minor отложены (список — в ответе пользователю), правок кода по ним не вносилось
+- Что исправил человек: TODO(German)

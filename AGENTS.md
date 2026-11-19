@@ -16,7 +16,7 @@
 `data/raw` (выдано, не в git), `data/processed` (кэш усечённых текстов T2, не в git),
 `outputs/` (сабмишны, не в git).
 
-Команды Makefile (появятся в Task 7 плана): `make install | lint | format | test | t1 |
+Команды Makefile: `make install | lint | format | test | t1 |
 t2-prepare-smoke | t2-smoke | validate | check-time-split | ci`.
 
 ## Правила валидации

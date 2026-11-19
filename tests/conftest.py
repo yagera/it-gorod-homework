@@ -42,3 +42,28 @@ def t1_frame() -> pd.DataFrame:
                 }
             )
     return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def t2_parquets(tmp_path, t2_codes):
+    """Синтетический T2: train 60 строк (каждый код по 20), test 20 строк."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    codes = sorted(t2_codes)
+    train = pd.DataFrame(
+        {
+            "text": [f"ДОК {codes[i % 3]} " + ("слово " * (10 + 700 * (i % 5))) for i in range(60)],
+            "code": [codes[i % 3] for i in range(60)],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "row_id": pd.Series(range(1, 21), dtype="int64"),
+            "text": [f"ДОК {codes[i % 3]} " + ("слово " * (10 + 700 * (i % 5))) for i in range(20)],
+        }
+    )
+    train_p, test_p = tmp_path / "train.parquet", tmp_path / "test.parquet"
+    pq.write_table(pa.Table.from_pandas(train, preserve_index=False), train_p)
+    pq.write_table(pa.Table.from_pandas(test, preserve_index=False), test_p)
+    return train_p, test_p

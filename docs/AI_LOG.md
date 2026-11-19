@@ -70,3 +70,11 @@
 - Файлы: src/itgorod/data.py, src/itgorod/t1.py, tests/test_t1.py, docs/AI_LOG.md
 - Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 43 passed; ruff чистый
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 5: батчевое чтение T2, усечение, кэш
+- Запрос: продолжить с Task 5 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: в `data.py` — `iter_t2_batches` (усечение `text` на стороне Arrow до перехода в pandas, остановка по `limit`), `cache_path` (в имени `max_chars` и число строк smoke), `build_t2_cache` (test всегда целиком, переиспользование и `force`, папка создаётся), `read_t2_codes` (только колонка `code`); фикстура `t2_parquets`
+- Файлы: src/itgorod/data.py, tests/conftest.py, tests/test_t2_data.py, docs/AI_LOG.md
+- Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 49 passed; ruff чистый. Реальный train, `limit=5000`, `batch_size=500`, `max_chars=5000`: 5000 строк, пик памяти ≈ 770 МБ, 2.6 с. Наблюдение: parquet из одной row group, для полного train (этап T2) пик памяти надо перемерить
+- Что исправил человек: TODO(German)

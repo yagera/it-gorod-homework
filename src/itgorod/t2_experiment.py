@@ -24,15 +24,26 @@ from itgorod.t2_cv import (
     build_meta,
     control_folds,
     fit_fold_features,
+    group_ids,
     main_folds,
     oof_report,
     seen_org_mask,
 )
 
 N_SPLITS = 5
-MEMORY_LIMIT_MB = 4096
+
+
+def _ram_limit_mb(share: float = 0.75) -> float:
+    """75% физической RAM из /proc/meminfo (MemTotal)."""
+    with open("/proc/meminfo") as f:
+        kb = int(next(line for line in f if line.startswith("MemTotal")).split()[1])
+    return kb / 1024 * share
+
+
+LOGREG_MAX_ITER = 200
+MEMORY_LIMIT_MB = _ram_limit_mb()
 META_MAX_CHARS = 5000  # хеш тела и орган считаются по этому усечению для всех max_chars
-CHAR_MAX_FEATURES = 100_000  # char_wb (3,4): (3,5) с 200k признаков не лезет в 4 ГБ у liblinear
+CHAR_MAX_FEATURES = 50_000  # пик памяти — float64-копия матрицы в LinearSVC, см. записи 14
 
 
 class MemoryLimitExceeded(RuntimeError):
@@ -51,12 +62,10 @@ class Experiment:
 
 
 def default_grid() -> list[Experiment]:
-    """5000: все модели и обе настройки class_weight (CNB весов не имеет); 2000 и 10000 —
-    только LinearSVC (быстрая модель) для проверки усечения."""
-    grid = [Experiment(m, cw, 5000) for m in ("logreg", "svc") for cw in ("none", "balanced")] + [
-        Experiment("cnb", "none", 5000)
-    ]
-    grid += [Experiment("svc", cw, c) for c in (2000, 10000) for cw in ("none", "balanced")]
+    """max_chars ∈ {2000, 5000}; LinearSVC / LogisticRegression / ComplementNB без весов;
+    `balanced` только у LinearSVC и только на 5000 (на 2000 не проверялся — сетка ограничена)."""
+    grid = [Experiment(m, "none", c) for c in (2000, 5000) for m in ("svc", "logreg", "cnb")]
+    grid.append(Experiment("svc", "balanced", 5000))
     return grid
 
 
@@ -92,7 +101,9 @@ def make_vectorizer(cfg: T2Config, char_max_features: int = CHAR_MAX_FEATURES) -
 def make_model(exp: Experiment, seed: int):
     cw = None if exp.class_weight == "none" else "balanced"
     if exp.model == "logreg":
-        return LogisticRegression(C=4.0, max_iter=200, class_weight=cw, random_state=seed)
+        return LogisticRegression(
+            C=4.0, max_iter=LOGREG_MAX_ITER, class_weight=cw, random_state=seed
+        )
     if exp.model == "svc":
         return LinearSVC(C=0.5, class_weight=cw, random_state=seed)
     if exp.model == "cnb":
@@ -137,6 +148,14 @@ def run_experiments(
         meta = meta.iloc[:limit].reset_index(drop=True)
     y = meta["code"].to_numpy()
     schemes = make_schemes(meta, cfg.seed)
+    for name, f in schemes.items():
+        sizes = np.bincount(group_ids(meta["body_hash"], meta["org_norm"]))
+        log(
+            f"схема {name}: фолды {np.bincount(f).tolist()}, "
+            f"крупнейшая группа {sizes.max()} ({sizes.max() / len(f):.1%} строк)"
+        )
+        if name == "control" and sizes.max() > len(f) / N_SPLITS:
+            log("ВНИМАНИЕ: крупнейшая группа больше 1/n_splits — контрольная схема искажена")
     seen = {s: seen_org_mask(meta["org_norm"], f) for s, f in schemes.items()}
     rows, per_class = [], []
     for max_chars in sorted({e.max_chars for e in grid}):
@@ -148,6 +167,7 @@ def run_experiments(
             texts = texts[:limit]
         preds = {(e.id, s): np.empty(len(y), dtype=object) for e in exps for s in schemes}
         secs = {e.id: 0.0 for e in exps}
+        not_converged = {(e.id, s): 0 for e in exps for s in schemes}
         for scheme, folds in schemes.items():
             for k in range(N_SPLITS):
                 va = np.flatnonzero(folds == k)
@@ -161,8 +181,13 @@ def run_experiments(
                     model = make_model(e, cfg.seed).fit(xtr, y[tr])
                     preds[(e.id, scheme)][va] = model.predict(xva)
                     secs[e.id] += time.time() - t1 + feat_s / len(exps)
+                    if e.model == "logreg":
+                        not_converged[(e.id, scheme)] += int(model.n_iter_.max() >= LOGREG_MAX_ITER)
+                    fit_s = time.time() - t1
+                    log(f"{e.id} {scheme} fold {k}: {fit_s:.0f}с, RSS {peak_rss_mb():.0f}")
                     check_memory()
-                log(f"{max_chars} {scheme} fold {k}: {feat_s:.0f}с, RSS {peak_rss_mb():.0f}")
+                del xtr, xva
+                log(f"{max_chars} {scheme} fold {k} готов: признаки {feat_s:.0f}с")
         for e in exps:
             row = {
                 "id": e.id,
@@ -182,6 +207,9 @@ def run_experiments(
                 ]
                 row.update(
                     {
+                        f"{scheme}_not_converged_folds": not_converged[(e.id, scheme)]
+                        if e.model == "logreg"
+                        else "",
                         f"{scheme}_macro_f1": round(rep["macro_f1"], 4),
                         f"{scheme}_fold_std": round(float(np.std(fold_f1)), 4),
                         f"{scheme}_f1_seen": round(rep["macro_f1_seen"], 4),

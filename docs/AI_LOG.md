@@ -166,3 +166,11 @@
 - Файлы: src/itgorod/t2_recon.py, notebooks/03_t2_recon.py, tests/test_t2_recon.py, docs/DECISIONS.md, AGENTS.md, docs/AI_LOG.md.
 - Проверка: `make ci` → ruff чисто, 133 passed; полный прогон `notebooks/03_t2_recon.py` → exit 0, ~17–27 с. Сабмишнов не создавалось, `validate-submission` не требовался.
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — T2: закрепление схемы валидации, бейзлайны, память
+- Запрос: закрепить схему валидации T2 (запись 13), TDD-бейзлайны (LinearSVC, LogisticRegression, ComplementNB; TF-IDF word+char; max_chars 2000/5000; balanced только у LinearSVC), измерить пик памяти, результаты в `outputs/` и `docs/EXPERIMENTS.md`; коммит схемы и кода по команде.
+- Модель/агент: Sonnet (код, доки); субагент reviewer/Opus (ревью кода и ревью результатов).
+- Что сделано: `t2_cv.py` (нормализация органа, основная и контрольная схемы, срезы OOF, fit только на train-части), `t2_experiment.py` + `itgorod t2 experiment` / `make t2-experiment`; коммит `e37ed02` (код и правила, без результатов). Замер памяти: пик в `fit` LinearSVC (float64-копия), урезание признаков (word 30k, char 50k) дало −3% (4,19 → 4,07 ГиБ), лимит прогона 75% RAM. Полный прогон 7 экспериментов; лучший — LinearSVC без весов, 2000 символов: Macro-F1 0,829 (main) / 0,792 (control). Выводы и ограничения — `docs/DECISIONS.md`, запись 14; 7 строк в `docs/EXPERIMENTS.md`. По ревью: поправлены формулировки (редкие классы, разрыв main/control, худшие классы control, пик RSS по группе), пометки типов, комментарии конфига. Результаты в `outputs/`, не в git; сабмишн не создавался.
+- Файлы: src/itgorod/t2_experiment.py, tests/test_t2_experiment.py, configs/t2.yaml, AGENTS.md, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; (в коммите e37ed02: src/itgorod/t2_cv.py, tests/test_t2_cv.py, cli.py, Makefile).
+- Проверка: `make ci` → см. ниже; мутация «fit векторайзера на всех текстах» → тест `test_run_experiments_fit_only_on_train_part` красный, код возвращён; полный `itgorod t2 experiment` → exit 0, пик RSS 4273 МиБ при лимите ≈22,5 ГиБ.
+- Что исправил человек: TODO(German)

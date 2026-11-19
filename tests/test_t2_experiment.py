@@ -44,7 +44,8 @@ def test_grid_ids_unique_and_cover_models():
     g = te.default_grid()
     assert len({e.id for e in g}) == len(g)
     assert {e.model for e in g} == {"logreg", "svc", "cnb"}
-    assert {e.max_chars for e in g} == {2000, 5000, 10000}
+    assert {e.max_chars for e in g} == {2000, 5000}
+    assert [e.id for e in g if e.class_weight == "balanced"] == ["t2-svc-balanced-c5000"]
 
 
 def test_run_experiments_synthetic(tmp_path):
@@ -63,5 +64,49 @@ def test_run_experiments_synthetic(tmp_path):
 
 def test_memory_guard(monkeypatch):
     monkeypatch.setattr(te, "peak_rss_mb", lambda: 5000.0)
+    monkeypatch.setattr(te, "MEMORY_LIMIT_MB", 4096.0)
     with pytest.raises(te.MemoryLimitExceeded):
         te.check_memory()
+
+
+def test_run_experiments_fit_only_on_train_part(tmp_path, monkeypatch):
+    """Правило A на месте вызова: векторайзер и модель видят только train-часть фолда."""
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.svm import LinearSVC
+
+    cfg = _cfg(tmp_path)
+    fit_docs, fit_labels = [], []
+
+    class SpyVec(TfidfVectorizer):
+        def fit_transform(self, raw_documents, y=None):
+            fit_docs.append(list(raw_documents))
+            return super().fit_transform(raw_documents, y)
+
+        def fit(self, raw_documents, y=None):
+            fit_docs.append(list(raw_documents))
+            return super().fit(raw_documents, y)
+
+    class SpyModel(LinearSVC):
+        def fit(self, X, y, **kw):
+            fit_labels.append((X.shape[0], len(y)))
+            return super().fit(X, y, **kw)
+
+    monkeypatch.setattr(te, "make_vectorizer", lambda cfg: SpyVec())
+    monkeypatch.setattr(te, "make_model", lambda exp, seed: SpyModel())
+    te.run_experiments(
+        cfg,
+        [te.Experiment("svc", "none", 5000)],
+        tmp_path / "e.csv",
+        tmp_path / "pc.csv",
+        log=lambda *_: None,
+    )
+    meta = te.load_meta(cfg)
+    texts = te.load_train(cfg, 5000)["text"].to_numpy()
+    schemes = te.make_schemes(meta, cfg.seed)
+    expected = {
+        frozenset(texts[folds != k]) for folds in schemes.values() for k in range(te.N_SPLITS)
+    }
+    assert len(fit_docs) == 2 * te.N_SPLITS
+    assert {frozenset(d) for d in fit_docs} == expected
+    for (n_rows, n_labels), docs in zip(fit_labels, fit_docs, strict=True):
+        assert n_rows == n_labels == len(docs)  # метки только train-части

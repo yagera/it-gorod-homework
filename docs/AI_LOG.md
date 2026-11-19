@@ -46,3 +46,11 @@
 - Файлы: src/itgorod/config.py, src/itgorod/seed.py, configs/t1.yaml, configs/t2.yaml, tests/test_config.py, docs/AI_LOG.md
 - Проверка: сначала тест падал (ошибка импорта), затем `uv run pytest tests/test_config.py -v` → 4 passed; по замечанию человека добавлен тест на лишний ключ в фолде (упал с TypeError), после правки `_folds` с `_check_keys` → 5 passed; `ruff check` и `ruff format --check` чистые
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 2: валидаторы сабмишнов
+- Запрос: продолжить с Task 2 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `validation.py` — `SubmissionError` (накапливает все нарушения), `read_submission_csv` (`dtype=str`), `validate_t1_submission`, `validate_t2_submission` (формат `NNN.NNN.NNN`, только коды train, порядок `row_id`); фикстуры в `tests/conftest.py`
+- Файлы: src/itgorod/validation.py, tests/conftest.py, tests/test_validation.py, docs/AI_LOG.md
+- Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 24 passed; ruff чистый (ruff поймал длинную строку и форматирование — исправлено); по замечанию человека `CODE_RE` переведён с `\d` на `[0-9]` (строгий ASCII): добавлен тест на юникодные цифры (код в `allowed_codes`, иначе тест не падал бы на старой регулярке) — RED на `\d`, затем 26 passed
+- Что исправил человек: TODO(German)

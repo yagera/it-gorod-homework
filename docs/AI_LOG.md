@@ -86,3 +86,11 @@
 - Файлы: src/itgorod/t2.py, tests/test_t2.py, tests/test_reproducibility.py, docs/AI_LOG.md
 - Проверка: `test_t2.py` сначала падал (ошибка импорта), затем `uv run pytest -q` → 54 passed; ruff чистый. `test_t1_reproducible` прошёл сразу — `run_t1` уже существовал с Task 4, так что RED для него не наблюдался
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 7: CLI, Makefile, прогон на реальных данных
+- Запрос: продолжить с Task 7 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `cli.py` (подкоманды `t1 predict`, `t2 prepare|train-predict [--smoke] [--force]`, `validate {t1,t2}`, `check-time-split`; коды возврата 0/1/2), `itgorod.main()` делегирует в CLI, `Makefile` с тонкими обёртками. Реальные данные: T1-плейсхолдер и T2-smoke построены и прошли `validate`
+- Файлы: src/itgorod/cli.py, src/itgorod/__init__.py, Makefile, tests/test_cli.py, docs/AI_LOG.md
+- Проверка: тесты CLI сначала падали (ошибка импорта); `make ci` → ruff чист, 60 passed. `make t1` + `itgorod validate t1` → OK, 505 строк; `make check-time-split` → оба фолда OK и признаки 2024 OK; `make t2-prepare-smoke` (пик памяти ≈ 0.87 ГБ, 2.4 с) и `make t2-smoke` (пик ≈ 1.5 ГБ, 25 с) + `itgorod validate t2 outputs/task-2.smoke.csv` → OK, 10001 строка. `data/`, `outputs/` в git не попали
+- Что исправил человек: TODO(German)

@@ -1,0 +1,13 @@
+seed: 42
+paths:
+  train: data/raw/task2/internship_train.parquet
+  test: data/raw/task2/internship_test.parquet
+  sample: data/raw/task2/sample_submission.csv
+  processed_dir: data/processed
+  output: outputs/task-2.csv
+  smoke_output: outputs/task-2.smoke.csv
+read: {batch_size: 500, max_chars: 5000}
+smoke: {n_train_rows: 5000}
+tfidf: {max_features: 50000, ngram_range: [1, 2], sublinear_tf: true}
+logreg: {C: 4.0, max_iter: 1000, class_weight: balanced}
+# validation: TBD — решается на этапе T2 (см. DECISIONS.md)

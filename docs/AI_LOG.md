@@ -38,3 +38,11 @@
 - Файлы: AGENTS.md, CLAUDE.md, .claude/settings.json, .claude/skills/log-step/SKILL.md, docs/AI_LOG.md
 - Проверка: `jq . .claude/settings.json` валиден, `enabledPlugins` на месте; `uv run pytest -q` → 1 passed
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 1: конфиги и seed
+- Запрос: продолжить с Task 1 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: `config.py` (dataclass'ы T1/T2, `Fold`, загрузка YAML, отказ на неизвестный ключ во всех секциях, включая элементы `split.folds[i]`; ключи `tfidf` и `logreg` не проверяются — они передаются в sklearn; пути от корня репо), `seed.py`, `configs/t1.yaml` (`split.folds` списком), `configs/t2.yaml` (без схемы валидации — TBD)
+- Файлы: src/itgorod/config.py, src/itgorod/seed.py, configs/t1.yaml, configs/t2.yaml, tests/test_config.py, docs/AI_LOG.md
+- Проверка: сначала тест падал (ошибка импорта), затем `uv run pytest tests/test_config.py -v` → 4 passed; по замечанию человека добавлен тест на лишний ключ в фолде (упал с TypeError), после правки `_folds` с `_check_keys` → 5 passed; `ruff check` и `ruff format --check` чистые
+- Что исправил человек: TODO(German)

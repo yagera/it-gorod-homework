@@ -54,3 +54,11 @@
 - Файлы: src/itgorod/validation.py, tests/conftest.py, tests/test_validation.py, docs/AI_LOG.md
 - Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 24 passed; ruff чистый (ruff поймал длинную строку и форматирование — исправлено); по замечанию человека `CODE_RE` переведён с `\d` на `[0-9]` (строгий ASCII): добавлен тест на юникодные цифры (код в `allowed_codes`, иначе тест не падал бы на старой регулярке) — RED на `\d`, затем 26 passed
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 3: проверки утечек по времени и метрики
+- Запрос: продолжить с Task 3 плана
+- Модель/агент: Sonnet 5.5
+- Что сделано: в `validation.py` — `LeakageError`, `split_fold` (expanding window), `assert_no_time_leakage`, `assert_folds_ordered`, `assert_features_for_year` (правило A); `metrics.py` — `mape` (доля), `macro_f1`; фикстура `t1_frame`; тест утечек параметризован по фолдам из `configs/t1.yaml`
+- Файлы: src/itgorod/validation.py, src/itgorod/metrics.py, tests/conftest.py, tests/test_time_split.py, tests/test_metrics.py, docs/AI_LOG.md
+- Проверка: тесты сначала падали (ошибка импорта), затем `uv run pytest -q` → 35 passed (по одному тесту на каждый фолд); ruff чистый
+- Что исправил человек: TODO(German)

@@ -158,3 +158,11 @@
 - Файлы: src/itgorod/eda.py, tests/test_eda_small.py (новый), notebooks/02_t1_small_values.py (новый), docs/figures/t1_small_values.png (новый), docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md. `t1.py` и `outputs/task-1.csv` не менялись.
 - Проверка: `make ci` → lint ок, 116 passed; мутации (убран фильтр по max_year в `elasticity_by_size`; p_proj без учёта NaN-таргета) → соответствующие тесты красные, код возвращён; `make t1-experiment` → α = 1,038 [0,923; 1,159] без изменений после рефакторинга; `uv run itgorod validate t1 outputs/task-1.csv` → OK 505 rows; `git diff HEAD -- src/itgorod/t1.py` → пусто.
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — T2: разведка данных, предложение схемы валидации
+- Запрос: ветка feat/task2, разведка T2 (схема, классы, иерархия, тексты, даты, дубли, код в тексте), замер пиковой памяти, выводы в DECISIONS/AGENTS, скрипт, тесты, reviewer, log-step, make ci; коммит только по команде.
+- Модель/агент: Sonnet (код, доки); субагенты explorer/Haiku (схема и шапки, полный прогон скрипта с `/usr/bin/time -v`), reviewer/Opus (ревью).
+- Что сделано: `src/itgorod/t2_recon.py` (иерархия, статистика классов, хеши головы и тела, дубли, код в тексте, разбор шапки: тип/дата акта/номер/орган/дата выгрузки, сплит по датам, пересечение органов); `notebooks/03_t2_recon.py` (потоковый проход через `iter_t2_batches`); запись 12 в DECISIONS и T2-раздел AGENTS.md (предложение, не принято). По ревью: строгая регулярка кода, хеш тела без шапки, пересечение органов, поправлены формулировки про память и дубли. Пик RSS ≈ 715–752 МиБ.
+- Файлы: src/itgorod/t2_recon.py, notebooks/03_t2_recon.py, tests/test_t2_recon.py, docs/DECISIONS.md, AGENTS.md, docs/AI_LOG.md.
+- Проверка: `make ci` → ruff чисто, 133 passed; полный прогон `notebooks/03_t2_recon.py` → exit 0, ~17–27 с. Сабмишнов не создавалось, `validate-submission` не требовался.
+- Что исправил человек: TODO(German)

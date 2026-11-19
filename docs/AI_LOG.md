@@ -182,3 +182,11 @@
 - Файлы: src/itgorod/t2.py, src/itgorod/cli.py, tests/test_t2.py, tests/test_cli.py, Makefile, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; outputs/task-2.csv (не в git).
 - Проверка: `uv run itgorod t2 train-predict --force` → exit 0, 114 с, пик RSS 2,86 ГиБ; `uv run itgorod validate t2 outputs/task-2.csv` → OK 10001 rows; независимая проверка pandas: порядок = sample, 58 из 58 классов; `make ci` → см. отчёт.
 - Что исправил человек: TODO(German)
+
+## 2026-11-20 — T2: настройка LinearSVC (усечение, голова+хвост, C, вклад шапки)
+- Запрос: усилить тест на утечку (шпион на любой fit векторайзера и модели, красный на сломанном коде), записать minor-замечания в known limitations; сетка: max_chars 1000/3000, голова+хвост (1500+500, 2000+1000), C ∈ {0,25; 0,5; 1; 2}, вклад шапки; σ по фолдам, контрольная схема для финалиста; фон через nohup, лимит памяти 75% RAM; `task-2.csv` не менять.
+- Модель/агент: Sonnet; субагент reviewer/Opus (ревью кода и результатов).
+- Что сделано: `tests/spies.py` + усиленные тесты (5 мутаций fit на чужих данных → красные); режим «голова + хвост» и «без шапки» на уровне Arrow (`compose_text`, эталонный тест); `Experiment` с `tail_chars`/`strip_header`/`C`; `run_experiments` с `scheme_names` и `append`; `t2_tune.py` (правило «прирост > σ», подтверждение control, возобновление) и `itgorod t2 tune` / `make t2-tune`. Итог: усечение остаётся 2000 (ни один выигрыш не превысил σ 0,0086); лучший C=2: main 0,8429 / control 0,8096 против базы 0,8289 / 0,7924, подтверждено контрольной; без шапки main 0,7458 (−0,0971). Оценка победителя оптимистична (выбор по той же CV). Записи 16 в DECISIONS, 8 строк в EXPERIMENTS. Первый запуск упал после этапа 1 из-за моей ошибки в `t2_tune.py`; исправлено, записано.
+- Файлы: src/itgorod/data.py, config.py, t2_experiment.py, t2_tune.py, cli.py, Makefile, tests/spies.py, tests/test_t2.py, tests/test_t2_experiment.py, tests/test_t2_data.py, tests/test_t2_tune.py, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; outputs/t2_experiments.csv, t2_per_class.csv, t2_tune_summary.json, логи (не в git).
+- Проверка: `make ci` → см. ниже; `itgorod t2 tune` → exit 0 после перезапуска; `md5sum -c` для `outputs/task-2.csv` → OK (не менялся); пик RSS 3781 МиБ при лимите ≈22,5 ГиБ.
+- Что исправил человек: TODO(German)

@@ -64,23 +64,54 @@ def test_t2_full_writes_valid_csv(tmp_path, t2_parquets):
     assert out["code"].str.startswith("0").any()  # ведущий нуль не потерян
 
 
-def test_t2_full_fit_never_sees_test_texts(tmp_path, t2_parquets, monkeypatch):
-    from sklearn.feature_extraction.text import TfidfVectorizer
+def _unique_parquets(tmp_path):
+    """Тексты train и test заведомо различны (маркеры TRAIN-/TEST-), чтобы fit на test был виден."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    codes = ["010.000.000", "020.150.030", "290.000.000"]
+    train = pd.DataFrame(
+        {
+            "text": [f"TRAIN-{i} {codes[i % 3][:3]}x " * 30 for i in range(60)],
+            "code": [codes[i % 3] for i in range(60)],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "row_id": pd.Series(range(1, 21), dtype="int64"),
+            "text": [f"TEST-{i} {codes[i % 3][:3]}x " * 30 for i in range(20)],
+        }
+    )
+    tp, sp = tmp_path / "tr.parquet", tmp_path / "te.parquet"
+    pq.write_table(pa.Table.from_pandas(train, preserve_index=False), tp)
+    pq.write_table(pa.Table.from_pandas(test, preserve_index=False), sp)
+    return tp, sp, train
+
+
+def _run_full_with_spies(tmp_path, monkeypatch):
+    from spies import Calls, make_spies
 
     from itgorod import t2 as t2_mod
 
-    seen = []
+    calls = Calls()
+    spy_vec, spy_model = make_spies(calls)
+    monkeypatch.setattr(t2_mod, "make_vectorizer", lambda cfg: spy_vec())
+    monkeypatch.setattr(t2_mod, "make_model", lambda exp, seed: spy_model())
+    train_p, test_p, train = _unique_parquets(tmp_path)
+    run_t2_full(_cfg(tmp_path, train_p, test_p))
+    return calls, train
 
-    class SpyVec(TfidfVectorizer):
-        def fit_transform(self, raw_documents, y=None):
-            seen.append(list(raw_documents))
-            return super().fit_transform(raw_documents, y)
 
-    monkeypatch.setattr(t2_mod, "make_vectorizer", lambda cfg: SpyVec())
-    cfg = _cfg(tmp_path, *t2_parquets)
-    run_t2_full(cfg)
-    # fit ровно один раз и ровно на 60 документах train (в test их 20)
-    assert len(seen) == 1 and len(seen[0]) == 60
+def test_t2_full_fit_only_on_train(tmp_path, monkeypatch):
+    """Правило A: любой fit векторайзера и модели — ровно на train; test не попадает ни в один."""
+    calls, train = _run_full_with_spies(tmp_path, monkeypatch)
+    train_texts = set(train["text"].str.slice(0, 2000))
+    assert len(calls.vec_fits) == 1 and len(calls.model_fits) == 1
+    for docs in calls.vec_fits:
+        assert len(docs) == 60 and set(docs) == train_texts
+        assert not any(d.startswith("TEST-") for d in docs)
+    n_rows, labels = calls.model_fits[0]
+    assert n_rows == 60 and labels == train["code"].tolist()
 
 
 def test_t2_full_rejects_row_id_mismatch(tmp_path, t2_parquets):

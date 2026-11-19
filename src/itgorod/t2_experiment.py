@@ -55,10 +55,21 @@ class Experiment:
     model: str  # logreg | svc | cnb
     class_weight: str  # none | balanced
     max_chars: int
+    tail_chars: int = 0  # >0: «голова + хвост» (max_chars первых + tail_chars последних)
+    strip_header: bool = False  # без шапки до «Текст документа»
+    C: float = 0.5  # только LinearSVC
+
+    @property
+    def variant(self) -> tuple[int, int, bool]:
+        """Вариант текста: признаки считаются один раз на (вариант, схема, фолд)."""
+        return (self.max_chars, self.tail_chars, self.strip_header)
 
     @property
     def id(self) -> str:
-        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}"
+        tail = f"-t{self.tail_chars}" if self.tail_chars else ""
+        hdr = "-nohdr" if self.strip_header else ""
+        c = f"-C{self.C:g}" if self.C != 0.5 else ""
+        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}{tail}{hdr}{c}"
 
 
 def default_grid() -> list[Experiment]:
@@ -105,15 +116,19 @@ def make_model(exp: Experiment, seed: int):
             C=4.0, max_iter=LOGREG_MAX_ITER, class_weight=cw, random_state=seed
         )
     if exp.model == "svc":
-        return LinearSVC(C=0.5, class_weight=cw, random_state=seed)
+        return LinearSVC(C=exp.C, class_weight=cw, random_state=seed)
     if exp.model == "cnb":
         return ComplementNB(alpha=0.3)
     raise ValueError(exp.model)
 
 
-def load_train(cfg: T2Config, max_chars: int) -> pd.DataFrame:
-    path = build_t2_cache(dataclasses.replace(cfg, max_chars=max_chars), "train", smoke=False)
-    return pd.read_parquet(path)
+def load_train(
+    cfg: T2Config, max_chars: int, tail_chars: int = 0, strip_header: bool = False
+) -> pd.DataFrame:
+    variant = dataclasses.replace(
+        cfg, max_chars=max_chars, tail_chars=tail_chars, strip_header=strip_header
+    )
+    return pd.read_parquet(build_t2_cache(variant, "train", smoke=False))
 
 
 def load_meta(cfg: T2Config) -> pd.DataFrame:
@@ -142,12 +157,16 @@ def run_experiments(
     per_class_csv: Path,
     limit: int | None = None,
     log=print,
+    scheme_names: tuple[str, ...] = ("main", "control"),
+    append: bool = False,
 ) -> pd.DataFrame:
+    """`scheme_names` — какие схемы считать; `append` — дописать к существующим CSV
+    (строки с теми же id заменяются)."""
     meta = load_meta(cfg)
     if limit:
         meta = meta.iloc[:limit].reset_index(drop=True)
     y = meta["code"].to_numpy()
-    schemes = make_schemes(meta, cfg.seed)
+    schemes = {k: v for k, v in make_schemes(meta, cfg.seed).items() if k in scheme_names}
     for name, f in schemes.items():
         sizes = np.bincount(group_ids(meta["body_hash"], meta["org_norm"]))
         log(
@@ -158,9 +177,9 @@ def run_experiments(
             log("ВНИМАНИЕ: крупнейшая группа больше 1/n_splits — контрольная схема искажена")
     seen = {s: seen_org_mask(meta["org_norm"], f) for s, f in schemes.items()}
     rows, per_class = [], []
-    for max_chars in sorted({e.max_chars for e in grid}):
-        exps = [e for e in grid if e.max_chars == max_chars]
-        frame = load_train(cfg, max_chars)
+    for variant in dict.fromkeys(e.variant for e in grid):
+        exps = [e for e in grid if e.variant == variant]
+        frame = load_train(cfg, *variant)
         texts = frame["text"].to_numpy()
         del frame
         if limit:
@@ -187,13 +206,16 @@ def run_experiments(
                     log(f"{e.id} {scheme} fold {k}: {fit_s:.0f}с, RSS {peak_rss_mb():.0f}")
                     check_memory()
                 del xtr, xva
-                log(f"{max_chars} {scheme} fold {k} готов: признаки {feat_s:.0f}с")
+                log(f"{variant} {scheme} fold {k} готов: признаки {feat_s:.0f}с")
         for e in exps:
             row = {
                 "id": e.id,
                 "model": e.model,
                 "class_weight": e.class_weight,
                 "max_chars": e.max_chars,
+                "tail_chars": e.tail_chars,
+                "strip_header": e.strip_header,
+                "C": e.C,
                 "seconds": round(secs[e.id]),
                 "peak_rss_mb": round(peak_rss_mb()),
                 "n_rows": len(y),
@@ -221,8 +243,25 @@ def run_experiments(
                 pc = rep["per_class"].assign(id=e.id, scheme=scheme)
                 per_class.append(pc)
             rows.append(row)
-        # промежуточная запись после каждого max_chars: падение не теряет готовые строки
-        out_csv.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(rows).to_csv(out_csv, index=False)
-        pd.concat(per_class, ignore_index=True).to_csv(per_class_csv, index=False)
+        # промежуточная запись после каждого варианта текста: падение не теряет готовые строки
+        _write(out_csv, per_class_csv, rows, per_class, append)
     return pd.DataFrame(rows)
+
+
+def _write(out_csv: Path, per_class_csv: Path, rows: list, per_class: list, append: bool) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    result = pd.DataFrame(rows)
+    pc = pd.concat(per_class, ignore_index=True)
+    if append and out_csv.exists():
+        old = pd.read_csv(out_csv)
+        old = old[~old["id"].isin(result["id"])]
+        result = pd.concat([old, result], ignore_index=True)
+        result = result.fillna({"tail_chars": 0, "strip_header": False, "C": 0.5})
+        result = result.astype({"tail_chars": int, "strip_header": bool})
+    if append and per_class_csv.exists():
+        old_pc = pd.read_csv(per_class_csv, dtype={"code": str})
+        key = set(zip(pc["id"], pc["scheme"], strict=True))
+        keep = [(i, sc) not in key for i, sc in zip(old_pc["id"], old_pc["scheme"], strict=True)]
+        pc = pd.concat([old_pc[keep], pc], ignore_index=True)
+    result.to_csv(out_csv, index=False)
+    pc.to_csv(per_class_csv, index=False)

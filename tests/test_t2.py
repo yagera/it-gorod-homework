@@ -50,9 +50,46 @@ def test_t2_smoke_subset_missing_class(tmp_path, t2_parquets):
     assert out["code"].nunique() <= 2
 
 
-def test_t2_full_not_implemented(tmp_path, t2_parquets):
-    with pytest.raises(NotImplementedError, match="этапе T2"):
-        run_t2_full(_cfg(tmp_path, *t2_parquets))
+def test_t2_full_writes_valid_csv(tmp_path, t2_parquets):
+    cfg = _cfg(tmp_path, *t2_parquets)
+    assert run_t2_full(cfg) == cfg.paths.output
+    out = read_submission_csv(cfg.paths.output)
+    sample = read_submission_csv(cfg.paths.sample)
+    validate_t2_submission(out, sample, read_t2_codes(t2_parquets[0]))
+    assert len(out) == len(sample) == 20
+    assert out["row_id"].tolist() == sample["row_id"].tolist()  # порядок как в sample
+    assert out["code"].map(type).eq(str).all()
+    assert out["code"].str.fullmatch(r"[0-9]{3}\.[0-9]{3}\.[0-9]{3}").all()
+    assert set(out["code"]) <= {"010.000.000", "020.150.030", "290.000.000"}
+    assert out["code"].str.startswith("0").any()  # ведущий нуль не потерян
+
+
+def test_t2_full_fit_never_sees_test_texts(tmp_path, t2_parquets, monkeypatch):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    from itgorod import t2 as t2_mod
+
+    seen = []
+
+    class SpyVec(TfidfVectorizer):
+        def fit_transform(self, raw_documents, y=None):
+            seen.append(list(raw_documents))
+            return super().fit_transform(raw_documents, y)
+
+    monkeypatch.setattr(t2_mod, "make_vectorizer", lambda cfg: SpyVec())
+    cfg = _cfg(tmp_path, *t2_parquets)
+    run_t2_full(cfg)
+    # fit ровно один раз и ровно на 60 документах train (в test их 20)
+    assert len(seen) == 1 and len(seen[0]) == 60
+
+
+def test_t2_full_rejects_row_id_mismatch(tmp_path, t2_parquets):
+    cfg = _cfg(tmp_path, *t2_parquets)
+    pd.DataFrame({"row_id": range(100, 120), "code": "000.000.000"}).to_csv(
+        cfg.paths.sample, index=False
+    )
+    with pytest.raises(ValueError, match="row_id"):
+        run_t2_full(cfg)
 
 
 def test_t2_smoke_reproducible(tmp_path, t2_parquets):

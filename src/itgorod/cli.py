@@ -9,7 +9,7 @@ from itgorod.config import REPO_ROOT, load_t1_config, load_t2_config
 from itgorod.data import build_t2_cache, read_t1, read_t2_codes
 from itgorod.t1 import TARGET, run_t1
 from itgorod.t1_experiment import run_t1_experiment
-from itgorod.t2 import run_t2_smoke
+from itgorod.t2 import run_t2_full, run_t2_smoke
 from itgorod.validation import (
     LeakageError,
     SubmissionError,
@@ -45,8 +45,8 @@ def _cmd_t2_prepare(args) -> int:
 def _cmd_t2_train_predict(args) -> int:
     cfg = load_t2_config(args.config)
     if not args.smoke:
-        print("полный прогон — на этапе T2 (пока доступен только --smoke)")
-        return 2
+        print(f"written: {run_t2_full(cfg, force=args.force)}")
+        return 0
     print(f"written (smoke): {run_t2_smoke(cfg, force=args.force)}")
     return 0
 

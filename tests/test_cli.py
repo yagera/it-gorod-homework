@@ -57,9 +57,16 @@ def test_validate_bad_returns_1(tmp_path, t1_frame, capsys):
     assert "yearly_cv_processed" in capsys.readouterr().out
 
 
-def test_t2_train_predict_without_smoke_returns_2(tmp_path, capsys):
-    assert main(["t2", "train-predict", "--config", "configs/t2.yaml"]) == 2
-    assert "этапе T2" in capsys.readouterr().out
+def test_t2_train_predict_without_smoke_runs_full(tmp_path, capsys, monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "itgorod.cli.run_t2_full",
+        lambda cfg, force=False: called.append(force) or tmp_path / "x.csv",
+    )
+    assert main(["t2", "train-predict", "--config", "configs/t2.yaml"]) == 0
+    assert called == [False] and "written" in capsys.readouterr().out
+    assert main(["t2", "train-predict", "--config", "configs/t2.yaml", "--force"]) == 0
+    assert called == [False, True]
 
 
 def test_check_time_split_ok(tmp_path, t1_frame, capsys):

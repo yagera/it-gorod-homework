@@ -174,3 +174,11 @@
 - Файлы: src/itgorod/t2_experiment.py, tests/test_t2_experiment.py, configs/t2.yaml, AGENTS.md, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; (в коммите e37ed02: src/itgorod/t2_cv.py, tests/test_t2_cv.py, cli.py, Makefile).
 - Проверка: `make ci` → см. ниже; мутация «fit векторайзера на всех текстах» → тест `test_run_experiments_fit_only_on_train_part` красный, код возвращён; полный `itgorod t2 experiment` → exit 0, пик RSS 4273 МиБ при лимите ≈22,5 ГиБ.
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — T2: страховочный сабмишн (LinearSVC, 2000 символов)
+- Запрос: закоммитить результаты сетки; реализовать `run_t2_full` (сначала тест), записать `outputs/task-2.csv`, провалидировать, добавить строку `t2-submit-svc-c2000`, показать распределение классов test против train.
+- Модель/агент: Sonnet; субагент reviewer на этом шаге не вызывался.
+- Что сделано: коммит результатов сетки; `run_t2_full` (fit векторайзера и модели на всём train, `max_chars`=2000, word 30k + char 50k), CLI `train-predict` без `--smoke` и `make t2`; тесты формата, порядка `row_id`, кодов из train, fit только на train, несовпадения `row_id`. Старый CLI-тест случайно запустил реальный прогон — переписан на заглушку. Запись 15 в DECISIONS, строка в EXPERIMENTS.
+- Файлы: src/itgorod/t2.py, src/itgorod/cli.py, tests/test_t2.py, tests/test_cli.py, Makefile, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; outputs/task-2.csv (не в git).
+- Проверка: `uv run itgorod t2 train-predict --force` → exit 0, 114 с, пик RSS 2,86 ГиБ; `uv run itgorod validate t2 outputs/task-2.csv` → OK 10001 rows; независимая проверка pandas: порядок = sample, 58 из 58 классов; `make ci` → см. отчёт.
+- Что исправил человек: TODO(German)

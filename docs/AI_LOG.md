@@ -102,3 +102,11 @@
 - Файлы: .pre-commit-config.yaml, .github/workflows/ci.yml, docs/AI_LOG.md
 - Проверка: `uv run pre-commit run --all-files` → все 7 хуков Passed; имитация CI (`uv sync --frozen --no-group dl` + ruff + pytest) → 60 passed; workflow YAML парсится. Реальный запуск CI на GitHub не проверялся (нужен push — по отдельной команде)
 - Что исправил человек: TODO(German)
+
+## 2026-11-19 — Task 9: остальная обвязка агентов
+- Запрос: продолжить с Task 9 плана; убрать `disallowedTools` из explorer, запреты оставить текстом контракта, записать остаточный риск, повторить пробу
+- Модель/агент: Sonnet 5.5; пробы — субагент explorer (haiku)
+- Что сделано: хук ruff format в `settings.json` (deny остался только на `.env*` и `git push`), агенты `reviewer` (opus, Read/Grep/Glob) и `explorer` (haiku, Read/Grep/Glob/Bash), скиллы `validate-submission` и `time-split-check`, раздел про субагентов и скиллы в `CLAUDE.md`, запись об остаточном риске explorer в `docs/DECISIONS.md`
+- Файлы: .claude/settings.json, .claude/agents/reviewer.md, .claude/agents/explorer.md, .claude/skills/validate-submission/SKILL.md, .claude/skills/time-split-check/SKILL.md, CLAUDE.md, docs/DECISIONS.md, docs/AI_LOG.md
+- Проверка: `jq . .claude/settings.json` валиден; хук на `src/itgorod/seed.py` → exit 0. Первая версия explorer с `disallowedTools` получила только Read/Grep/Glob (без Bash) — убрано. Вторая проба до перезагрузки агентов — Bash всё ещё нет (определение не перечитано). После `/reload-plugins`: `uv run python -I -c "import pyarrow"` выполнен (26.0.1), `rm` отклонён агентом по контракту, файл цел
+- Что исправил человек: TODO(German) (перезагрузил агентов; выбрал вариант без `disallowedTools`)

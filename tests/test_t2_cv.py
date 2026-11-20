@@ -167,3 +167,40 @@ def test_date_group_folds_missing_dates_and_duplicates():
     assert len(f) == 42 and set(f) <= {0, 1, 2, 3}
     assert f[40] == 3  # без даты → последняя группа
     assert f[41] == f[0]  # дубль тела уходит в фолд первой копии, даже без даты
+
+
+# ---- подмена даты выгрузки в valid-текстах ----
+
+
+def test_swap_fetch_date_only_the_header_date():
+    from itgorod.t2_cv import swap_fetch_date
+
+    t = (
+        "РЕШЕНИЕ от 20.01.2026 № 5 Орган А 20.01.2026 Текст документа "
+        "тело 20.01.2026 и снова 20.01.2026"
+    )
+    out = swap_fetch_date(t, "31.01.2026")
+    assert out == (
+        "РЕШЕНИЕ от 20.01.2026 № 5 Орган А 31.01.2026 Текст документа "
+        "тело 20.01.2026 и снова 20.01.2026"
+    )
+    assert swap_fetch_date("без шапки", "31.01.2026") == "без шапки"  # даты нет — без изменений
+
+
+def test_swap_valid_dates_pool_seed_and_count():
+    from itgorod.t2_cv import swap_valid_dates
+
+    valid = [
+        f"РЕШЕНИЕ от 01.01.2025 № {i} Орган 19.01.2026 Текст документа тело" for i in range(50)
+    ]
+    valid.append("без шапки совсем")
+    pool = ["25.01.2026", "26.01.2026", "27.01.2026"]
+    a, n_a = swap_valid_dates(valid, pool, seed=42)
+    b, n_b = swap_valid_dates(valid, pool, seed=42)
+    c, _ = swap_valid_dates(valid, pool, seed=7)
+    assert a == b and n_a == n_b and a != c  # детерминированно по seed
+    assert a[-1] == valid[-1]  # документ без даты не тронут
+    assert n_a == 50  # у всех 50 документов дата заменена (пул не содержит исходную)
+    for t in a[:-1]:
+        assert any(f" {d} Текст документа" in t for d in pool)
+    assert len(a) == len(valid)

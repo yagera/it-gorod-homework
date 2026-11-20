@@ -330,3 +330,93 @@ def test_duplicate_ids_in_grid_run_once(tmp_path):
         cfg, [e, e], tmp_path / "e.csv", tmp_path / "pc.csv", log=lambda *_: None
     )
     assert len(res) == 1 and len(pd.read_csv(tmp_path / "e.csv")) == 1
+
+
+# ---- оценка с подменой даты выгрузки в valid ----
+
+
+def _dated_cfg(tmp_path):
+    """Как `_cfg`, но у документов разные даты выгрузки (19..23 января)."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    cfg = _cfg(tmp_path)
+    rng = np.random.default_rng(0)
+    codes = ["010.000.000", "020.000.000", "030.000.000"]
+    words = {c: [f"{c[:3]}{w}" for w in "abcdefgh"] for c in codes}
+    texts, ys = [], []
+    for i in range(90):
+        c = codes[i % 3]
+        body = " ".join(rng.choice(words[c], 80)) + f" уник{i}"
+        d = 19 + i % 5
+        texts.append(
+            f"РЕШЕНИЕ от 01.02.2025 № {i} Орган {i % 30} {d}.01.2026 Текст документа {body}"
+        )
+        ys.append(c)
+    pq.write_table(pa.table({"text": texts, "code": ys}), cfg.paths.train)
+    return cfg
+
+
+def test_swap_experiment_id_and_validation():
+    e = te.Experiment("svc", "none", 2000, C=1.0, perturb="swap_fetch_date")
+    assert e.id == "t2-svc-none-c2000-C1-swapdate"
+    assert e.variant == te.Experiment("svc", "none", 2000, C=1.0).variant  # те же тексты
+    assert e.group_key != te.Experiment("svc", "none", 2000, C=1.0).group_key
+    with pytest.raises(ValueError):
+        te.Experiment("svc", "none", 2000, perturb="bogus").id  # noqa: B018
+
+
+def test_swap_touches_only_valid_not_train(tmp_path, monkeypatch):
+    from spies import Calls, make_spies
+
+    cfg = _dated_cfg(tmp_path)
+    calls = Calls()
+    spy_vec, spy_model = make_spies(calls)
+    monkeypatch.setattr(te, "make_vectorizer", lambda cfg: spy_vec())
+    monkeypatch.setattr(te, "make_model", lambda exp, seed: spy_model())
+    pools = []
+    real_swap = te.swap_valid_dates
+
+    def recording_swap(valid, pool, seed):
+        pools.append((list(pool), seed))
+        return real_swap(valid, pool, seed)
+
+    monkeypatch.setattr(te, "swap_valid_dates", recording_swap)
+    exp = te.Experiment("svc", "none", 5000, perturb="swap_fetch_date")
+    res = te.run_experiments(
+        cfg,
+        [exp],
+        tmp_path / "e.csv",
+        tmp_path / "pc.csv",
+        log=lambda *_: None,
+        scheme_names=("main",),
+    )
+    meta = te.load_meta(cfg)
+    texts = te.load_train(cfg, 5000)["text"].to_numpy()
+    folds = te.make_schemes(meta, cfg.seed)["main"]
+    assert len(calls.vec_fits) == len(calls.vec_transforms) == te.N_SPLITS
+    from itgorod.t2_recon import FETCH_RE
+
+    n_diff = 0
+    for k in range(te.N_SPLITS):
+        # train-часть: fit ровно на исходных текстах (подмена train не трогает)
+        assert calls.vec_fits[k] == list(texts[folds != k])
+        # valid: отличается только датой выгрузки
+        orig, got = list(texts[folds == k]), calls.vec_transforms[k]
+        assert len(got) == len(orig)
+        for o, g in zip(orig, got, strict=True):
+            mo, mg = FETCH_RE.search(o), FETCH_RE.search(g)
+            assert o[: mo.start("fetch")] == g[: mg.start("fetch")]
+            assert o[mo.end("fetch") :] == g[mg.end("fetch") :]
+            n_diff += o != g
+        # даты берутся из train-части фолда
+        pool = {FETCH_RE.search(t).group("fetch") for t in texts[folds != k]}
+        assert {FETCH_RE.search(g).group("fetch") for g in got} <= pool
+    # пул дат — ровно даты train-части своего фолда (с кратностями), seed фиксирован
+    from itgorod.t2_cv import fetch_date_pool
+
+    assert len(pools) == te.N_SPLITS
+    for k, (pool, seed) in enumerate(pools):
+        assert sorted(pool) == sorted(fetch_date_pool(list(texts[folds != k])))
+        assert tuple(seed) == (cfg.seed, k)
+    assert n_diff > 0 and res.loc[0, "main_n_perturbed"] == n_diff

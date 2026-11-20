@@ -405,3 +405,54 @@ def run_date_stability(
     }
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float))
     return summary
+
+
+FINALIST = Experiment("svc", "none", 2000, C=1.0)
+ABLATION_NO_NUMDATES_ID = "t2-svc-none-c2000-nohdr-C1-hdr-no_numdates"
+
+
+def run_swap_date_eval(
+    cfg: T2Config,
+    out_csv: Path,
+    per_class_csv: Path,
+    summary_json: Path,
+    log=print,
+    base: Experiment = FINALIST,
+    drop_thr: float = 0.10,
+) -> dict:
+    """Оценка зависимости от даты выгрузки: модель обучается как обычно (с настоящими датами),
+    в valid-текстах дата выгрузки заменяется случайной датой из train-части фолда (генератор
+    инициализируется парой (42, номер фолда)). Только оценка —
+    сабмишн не пишется. Сравнение: с финалистом и с абляцией «без номера и дат»."""
+    swap = dataclasses.replace(base, perturb="swap_fetch_date")
+    run = _runner(cfg, out_csv, per_class_csv, log)
+    rows = run([base], ("main", "control"))
+    rows = run([swap], ("main", "control"))
+    pc = pd.read_csv(per_class_csv, dtype={"code": str})
+    b, w = rows[base.id], rows[swap.id]
+    abl = rows.get(ABLATION_NO_NUMDATES_ID)
+    summary = {
+        "baseline": {s: b[f"{s}_macro_f1"] for s in ("main", "control")},
+        "swapped": {
+            s: {
+                "macro_f1": w[f"{s}_macro_f1"],
+                "f1_rare": w[f"{s}_f1_rare"],
+                "fold_std": w[f"{s}_fold_std"],
+            }
+            for s in ("main", "control")
+        },
+        "delta": {
+            s: round(w[f"{s}_macro_f1"] - b[f"{s}_macro_f1"], 4) for s in ("main", "control")
+        },
+        "baseline_f1_rare": {s: b[f"{s}_f1_rare"] for s in ("main", "control")},
+        "drops_gt_10pp": {
+            s: big_drops(pc, base.id, swap.id, s, drop_thr) for s in ("main", "control")
+        },
+        "n_perturbed": {s: int(w[f"{s}_n_perturbed"]) for s in ("main", "control")},
+        "ablation_no_numdates": (
+            None if abl is None else {s: abl.get(f"{s}_macro_f1") for s in ("main", "control")}
+        ),
+        "note": "только оценка; сабмишн не менялся; дата подменяется только в valid",
+    }
+    summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float))
+    return summary

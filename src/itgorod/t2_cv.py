@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import f1_score, precision_recall_fscore_support
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 
-from itgorod.t2_recon import body_hash, parse_header, split_header
+from itgorod.t2_recon import FETCH_RE, body_hash, parse_header, split_header
 
 _PUNCT_RE = re.compile(r"[^\w\s]|_")
 
@@ -162,3 +162,35 @@ def date_group_folds(fetch: Sequence, body_hashes: Sequence, n_groups: int = 4) 
     for i, h in enumerate(body_hashes):
         folds[i] = folds[first.setdefault(h, i)]
     return folds
+
+
+def fetch_date_pool(texts: Sequence[str]) -> list[str]:
+    """Даты выгрузки документов (только найденные) — пул для подмены."""
+    return [d for d in fetch_dates(texts) if d is not None]
+
+
+def swap_fetch_date(text: str, new_date: str) -> str:
+    """Заменяет дату выгрузки (перед «Текст документа») на `new_date`; остальной текст, включая
+    такие же даты в теле, не меняется. Нет даты — текст без изменений."""
+    m = FETCH_RE.search(text[:1000])
+    if m is None:
+        return text
+    return text[: m.start("fetch")] + new_date + text[m.end("fetch") :]
+
+
+def swap_valid_dates(
+    valid_texts: Sequence[str], pool: Sequence[str], seed
+) -> tuple[list[str], int]:
+    """Подмена даты выгрузки в valid-текстах случайной датой из `pool` (дат train-части фолда).
+    Детерминированно по `seed`; возвращает тексты и число документов, у которых дата изменилась."""
+    rng = np.random.default_rng(seed)
+    out, changed = [], 0
+    for t in valid_texts:
+        m = FETCH_RE.search(t[:1000])
+        if m is None:
+            out.append(t)
+            continue
+        new = pool[int(rng.integers(len(pool)))]
+        changed += new != m.group("fetch")
+        out.append(swap_fetch_date(t, new))
+    return out, int(changed)

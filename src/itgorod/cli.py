@@ -124,6 +124,26 @@ def _cmd_t2_stability(args) -> int:
     return 0
 
 
+def _cmd_t2_swapdate(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_swap_date_eval
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        run_swap_date_eval(
+            cfg,
+            out / "t2_experiments.csv",
+            out / "t2_per_class.csv",
+            out / "t2_swapdate_summary.json",
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_swapdate_summary.json'}")
+    return 0
+
+
 def _cmd_validate(args) -> int:
     try:
         return _validate(args)
@@ -208,6 +228,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = t2.add_parser("stability")
     p.add_argument("--config", default="configs/t2.yaml")
     p.set_defaults(func=_cmd_t2_stability)
+
+    p = t2.add_parser("swapdate")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_swapdate)
 
     p = sub.add_parser("validate")
     p.add_argument("task", choices=["t1", "t2"])

@@ -24,11 +24,13 @@ from itgorod.data import build_t2_cache
 from itgorod.t2_cv import (
     build_meta,
     control_folds,
+    fetch_date_pool,
     fit_fold_features,
     group_ids,
     main_folds,
     oof_report,
     seen_org_mask,
+    swap_valid_dates,
 )
 from itgorod.t2_recon import HEADER_PARTS, header_part_text, split_header
 
@@ -63,6 +65,20 @@ class Experiment:
     # абляция шапки: перед телом (без шапки, `strip_header=True`) ставятся только выбранные части
     # шапки — only_<часть> | no_<часть> | full, части: type, org, numdates (см. `t2_recon`)
     header_mode: str = ""
+    # возмущение valid-текстов при оценке (модель обучается как обычно): swap_fetch_date —
+    # дата выгрузки в valid заменяется случайной датой из train-части фолда
+    perturb: str = ""
+
+    def __post_init__(self):
+        if self.perturb not in ("", "swap_fetch_date"):
+            raise ValueError(f"неизвестное возмущение: {self.perturb!r}")
+        if self.perturb and (self.header_mode or self.strip_header or self.tail_chars):
+            raise ValueError("swap_fetch_date поддержан только для текстов с исходной шапкой")
+
+    @property
+    def group_key(self) -> tuple:
+        """Признаки общие внутри группы: вариант текста и возмущение valid."""
+        return (*self.variant, self.perturb)
 
     @property
     def variant(self) -> tuple[int, int, bool, str]:
@@ -75,7 +91,8 @@ class Experiment:
         hdr = "-nohdr" if self.strip_header else ""
         c = f"-C{self.C:g}" if self.C != 0.5 else ""
         mode = f"-hdr-{self.header_mode}" if self.header_mode else ""
-        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}{tail}{hdr}{c}{mode}"
+        swap = "-swapdate" if self.perturb else ""
+        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}{tail}{hdr}{c}{mode}{swap}"
 
 
 def default_grid() -> list[Experiment]:
@@ -224,20 +241,28 @@ def run_experiments(
             log("ВНИМАНИЕ: крупнейшая группа больше 1/n_splits — контрольная схема искажена")
     seen = {s: seen_org_mask(meta["org_norm"], f) for s, f in schemes.items()}
     rows, per_class = [], []
-    for variant in dict.fromkeys(e.variant for e in grid):
-        exps = [e for e in grid if e.variant == variant]
+    for gkey in dict.fromkeys(e.group_key for e in grid):
+        variant = gkey[:4]
+        exps = [e for e in grid if e.group_key == gkey]
         texts = load_variant_texts(cfg, exps[0])
         if limit:
             texts = texts[:limit]
         preds = {(e.id, s): np.empty(len(y), dtype=object) for e in exps for s in schemes}
         secs = {e.id: 0.0 for e in exps}
         not_converged = {(e.id, s): 0 for e in exps for s in schemes}
+        perturbed = {(e.id, s): 0 for e in exps for s in schemes}
         for scheme, folds in schemes.items():
             for k in np.unique(folds):
                 va = np.flatnonzero(folds == k)
                 tr = np.flatnonzero(folds != k)
                 t0 = time.time()
-                xtr, xva = fit_fold_features(make_vectorizer(cfg), texts[tr], texts[va])
+                va_texts = texts[va]
+                n_changed = 0
+                if exps[0].perturb:  # группа целиком с возмущением valid (train не меняется)
+                    va_texts, n_changed = swap_valid_dates(
+                        va_texts, fetch_date_pool(texts[tr]), (cfg.seed, int(k))
+                    )
+                xtr, xva = fit_fold_features(make_vectorizer(cfg), texts[tr], va_texts)
                 check_memory()
                 feat_s = time.time() - t0
                 for e in exps:
@@ -245,6 +270,7 @@ def run_experiments(
                     model = make_model(e, cfg.seed).fit(xtr, y[tr])
                     preds[(e.id, scheme)][va] = model.predict(xva)
                     secs[e.id] += time.time() - t1 + feat_s / len(exps)
+                    perturbed[(e.id, scheme)] += n_changed
                     if e.model == "logreg":
                         not_converged[(e.id, scheme)] += int(model.n_iter_.max() >= LOGREG_MAX_ITER)
                     fit_s = time.time() - t1
@@ -285,6 +311,11 @@ def run_experiments(
                         f"{scheme}_f1_unseen": round(rep["macro_f1_unseen"], 4),
                         f"{scheme}_f1_rare": round(rep["macro_f1_rare"], 4),
                         f"{scheme}_n_unseen": rep["n_unseen"],
+                        **(
+                            {f"{scheme}_n_perturbed": perturbed[(e.id, scheme)]}
+                            if e.perturb
+                            else {}
+                        ),
                     }
                 )
                 pc = rep["per_class"].assign(id=e.id, scheme=scheme)

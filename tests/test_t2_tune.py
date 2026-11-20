@@ -283,3 +283,32 @@ def test_date_stability_rejects_length_mismatch(tmp_path):
             exps=[Experiment("svc", "none", 5000)],
             fetch=["20.01.2026"] * 5,
         )
+
+
+def test_run_swap_date_eval_synthetic(tmp_path):
+    from test_t2_experiment import _dated_cfg
+
+    cfg = _dated_cfg(tmp_path)
+    out, pc, summ = tmp_path / "e.csv", tmp_path / "pc.csv", tmp_path / "sw.json"
+    base = Experiment("svc", "none", 5000)
+    s = tt.run_swap_date_eval(cfg, out, pc, summ, log=lambda *_: None, base=base)
+    rows = pd.read_csv(out)
+    assert set(rows["id"]) == {base.id, base.id + "-swapdate"}
+    sw = rows[rows["id"] == base.id + "-swapdate"].iloc[0]
+    assert sw["main_n_perturbed"] > 0 and sw["control_n_perturbed"] > 0
+    assert set(s) >= {
+        "baseline",
+        "swapped",
+        "delta",
+        "drops_gt_10pp",
+        "n_perturbed",
+        "ablation_no_numdates",
+        "note",
+    }
+    for scheme in ("main", "control"):
+        assert s["swapped"][scheme]["macro_f1"] == sw[f"{scheme}_macro_f1"]
+        assert s["delta"][scheme] == pytest.approx(
+            sw[f"{scheme}_macro_f1"] - rows[rows["id"] == base.id].iloc[0][f"{scheme}_macro_f1"],
+            abs=1e-4,
+        )
+        assert isinstance(s["drops_gt_10pp"][scheme], dict)

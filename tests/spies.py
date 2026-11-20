@@ -8,6 +8,7 @@ from sklearn.svm import LinearSVC
 class Calls:
     def __init__(self):
         self.vec_fits: list[list[str]] = []  # документы каждого fit/fit_transform векторайзера
+        self.vec_transforms: list[list[str]] = []  # документы каждого transform
         self.model_fits: list[tuple[int, list]] = []  # (число строк X, метки y) каждого fit модели
 
 
@@ -22,6 +23,11 @@ def make_spies(calls: Calls):
             raw_documents = list(raw_documents)
             calls.vec_fits.append(raw_documents)
             return super().fit_transform(raw_documents, y)
+
+        def transform(self, raw_documents):
+            raw_documents = list(raw_documents)
+            calls.vec_transforms.append(raw_documents)
+            return super().transform(raw_documents)
 
     class SpyModel(LinearSVC):
         def fit(self, X, y, **kw):

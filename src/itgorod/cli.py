@@ -144,6 +144,52 @@ def _cmd_t2_swapdate(args) -> int:
     return 0
 
 
+def _cmd_t2_embed(args) -> int:
+    from itgorod.embeddings import HFEncoder, embed_corpus
+
+    cfg = load_t2_config(args.config)
+    encoder = HFEncoder(args.model, max_tokens=args.max_tokens)
+    paths = embed_corpus(
+        cfg, encoder, args.model, args.max_tokens, REPO_ROOT / "data" / "cache", args.batch_size
+    )
+    for p in paths:
+        print(f"cache: {p}")
+    return 0
+
+
+def _cmd_t2_oof_svc(args) -> int:
+    from itgorod.t2 import FULL_EXPERIMENT
+    from itgorod.t2_embed_eval import compute_svc_oof
+
+    cfg = load_t2_config(args.config)
+    compute_svc_oof(cfg, FULL_EXPERIMENT, REPO_ROOT / "outputs")
+    return 0
+
+
+def _cmd_t2_embed_eval(args) -> int:
+    from itgorod.t2 import FULL_EXPERIMENT
+    from itgorod.t2_embed_eval import compute_svc_oof, run_embed_eval
+    from itgorod.t2_experiment import load_meta, make_schemes
+
+    cfg = load_t2_config(args.config)
+    meta = load_meta(cfg)
+    out = REPO_ROOT / "outputs"
+    svc = compute_svc_oof(cfg, FULL_EXPERIMENT, out)
+    res = run_embed_eval(
+        args.model,
+        args.max_tokens,
+        meta["code"].to_numpy(),
+        meta["org_norm"],
+        make_schemes(meta, cfg.seed),
+        svc,
+        REPO_ROOT / "data" / "cache",
+        out,
+        max_iter=args.max_iter,
+    )
+    print(f"written: outputs/t2_embed_eval_*; {res['model']}")
+    return 0
+
+
 def _cmd_validate(args) -> int:
     try:
         return _validate(args)
@@ -232,6 +278,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = t2.add_parser("swapdate")
     p.add_argument("--config", default="configs/t2.yaml")
     p.set_defaults(func=_cmd_t2_swapdate)
+
+    p = t2.add_parser("embed")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.add_argument("--model", default="intfloat/multilingual-e5-base")
+    p.add_argument("--max-tokens", type=int, default=512)
+    p.add_argument("--batch-size", type=int, default=32)
+    p.set_defaults(func=_cmd_t2_embed)
+
+    p = t2.add_parser("oof-svc")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_oof_svc)
+
+    p = t2.add_parser("embed-eval")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.add_argument("--model", default="intfloat/multilingual-e5-base")
+    p.add_argument("--max-tokens", type=int, default=512)
+    p.add_argument("--max-iter", type=int, default=300, help="итерации LogisticRegression")
+    p.set_defaults(func=_cmd_t2_embed_eval)
 
     p = sub.add_parser("validate")
     p.add_argument("task", choices=["t1", "t2"])

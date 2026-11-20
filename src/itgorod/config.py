@@ -63,6 +63,8 @@ class T2Config:
     smoke_n_train_rows: int
     tfidf: dict
     logreg: dict
+    tail_chars: int = 0  # >0: «голова + хвост» (max_chars первых + tail_chars последних)
+    strip_header: bool = False  # убрать шапку до «Текст документа» перед усечением
 
 
 def _resolve(path: str | Path) -> Path:

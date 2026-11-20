@@ -50,9 +50,77 @@ def test_t2_smoke_subset_missing_class(tmp_path, t2_parquets):
     assert out["code"].nunique() <= 2
 
 
-def test_t2_full_not_implemented(tmp_path, t2_parquets):
-    with pytest.raises(NotImplementedError, match="этапе T2"):
-        run_t2_full(_cfg(tmp_path, *t2_parquets))
+def test_t2_full_writes_valid_csv(tmp_path, t2_parquets):
+    cfg = _cfg(tmp_path, *t2_parquets)
+    assert run_t2_full(cfg) == cfg.paths.output
+    out = read_submission_csv(cfg.paths.output)
+    sample = read_submission_csv(cfg.paths.sample)
+    validate_t2_submission(out, sample, read_t2_codes(t2_parquets[0]))
+    assert len(out) == len(sample) == 20
+    assert out["row_id"].tolist() == sample["row_id"].tolist()  # порядок как в sample
+    assert out["code"].map(type).eq(str).all()
+    assert out["code"].str.fullmatch(r"[0-9]{3}\.[0-9]{3}\.[0-9]{3}").all()
+    assert set(out["code"]) <= {"010.000.000", "020.150.030", "290.000.000"}
+    assert out["code"].str.startswith("0").any()  # ведущий нуль не потерян
+
+
+def _unique_parquets(tmp_path):
+    """Тексты train и test заведомо различны (маркеры TRAIN-/TEST-), чтобы fit на test был виден."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    codes = ["010.000.000", "020.150.030", "290.000.000"]
+    train = pd.DataFrame(
+        {
+            "text": [f"TRAIN-{i} {codes[i % 3][:3]}x " * 30 for i in range(60)],
+            "code": [codes[i % 3] for i in range(60)],
+        }
+    )
+    test = pd.DataFrame(
+        {
+            "row_id": pd.Series(range(1, 21), dtype="int64"),
+            "text": [f"TEST-{i} {codes[i % 3][:3]}x " * 30 for i in range(20)],
+        }
+    )
+    tp, sp = tmp_path / "tr.parquet", tmp_path / "te.parquet"
+    pq.write_table(pa.Table.from_pandas(train, preserve_index=False), tp)
+    pq.write_table(pa.Table.from_pandas(test, preserve_index=False), sp)
+    return tp, sp, train
+
+
+def _run_full_with_spies(tmp_path, monkeypatch):
+    from spies import Calls, make_spies
+
+    from itgorod import t2 as t2_mod
+
+    calls = Calls()
+    spy_vec, spy_model = make_spies(calls)
+    monkeypatch.setattr(t2_mod, "make_vectorizer", lambda cfg: spy_vec())
+    monkeypatch.setattr(t2_mod, "make_model", lambda exp, seed: spy_model())
+    train_p, test_p, train = _unique_parquets(tmp_path)
+    run_t2_full(_cfg(tmp_path, train_p, test_p))
+    return calls, train
+
+
+def test_t2_full_fit_only_on_train(tmp_path, monkeypatch):
+    """Правило A: любой fit векторайзера и модели — ровно на train; test не попадает ни в один."""
+    calls, train = _run_full_with_spies(tmp_path, monkeypatch)
+    train_texts = set(train["text"].str.slice(0, 2000))
+    assert len(calls.vec_fits) == 1 and len(calls.model_fits) == 1
+    for docs in calls.vec_fits:
+        assert len(docs) == 60 and set(docs) == train_texts
+        assert not any(d.startswith("TEST-") for d in docs)
+    n_rows, labels = calls.model_fits[0]
+    assert n_rows == 60 and labels == train["code"].tolist()
+
+
+def test_t2_full_rejects_row_id_mismatch(tmp_path, t2_parquets):
+    cfg = _cfg(tmp_path, *t2_parquets)
+    pd.DataFrame({"row_id": range(100, 120), "code": "000.000.000"}).to_csv(
+        cfg.paths.sample, index=False
+    )
+    with pytest.raises(ValueError, match="row_id"):
+        run_t2_full(cfg)
 
 
 def test_t2_smoke_reproducible(tmp_path, t2_parquets):
@@ -61,3 +129,18 @@ def test_t2_smoke_reproducible(tmp_path, t2_parquets):
     first = cfg.paths.smoke_output.read_bytes()
     run_t2_smoke(cfg, force=True)
     assert cfg.paths.smoke_output.read_bytes() == first
+
+
+def test_t2_full_uses_finalist_config(tmp_path, monkeypatch):
+    """Сабмишн обучается ровно на конфиге финалиста настройки (LinearSVC, C=1, 2000 символов)
+    и берёт векторайзер из общей фабрики — связка с экспериментами закреплена тестом."""
+    from itgorod import t2 as t2_mod
+    from itgorod.t2_experiment import Experiment
+
+    got = []
+    real = t2_mod.make_model
+    monkeypatch.setattr(t2_mod, "make_model", lambda exp, seed: got.append(exp) or real(exp, seed))
+    train_p, test_p, _ = _unique_parquets(tmp_path)
+    run_t2_full(_cfg(tmp_path, train_p, test_p))
+    assert got == [Experiment("svc", "none", 2000, C=1.0)]
+    assert t2_mod.FULL_EXPERIMENT == got[0] and t2_mod.FULL_EXPERIMENT.id == "t2-svc-none-c2000-C1"

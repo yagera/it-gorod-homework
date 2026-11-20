@@ -5,11 +5,11 @@ import sys
 
 import pandas as pd
 
-from itgorod.config import load_t1_config, load_t2_config
+from itgorod.config import REPO_ROOT, load_t1_config, load_t2_config
 from itgorod.data import build_t2_cache, read_t1, read_t2_codes
 from itgorod.t1 import TARGET, run_t1
 from itgorod.t1_experiment import run_t1_experiment
-from itgorod.t2 import run_t2_smoke
+from itgorod.t2 import run_t2_full, run_t2_smoke
 from itgorod.validation import (
     LeakageError,
     SubmissionError,
@@ -45,9 +45,102 @@ def _cmd_t2_prepare(args) -> int:
 def _cmd_t2_train_predict(args) -> int:
     cfg = load_t2_config(args.config)
     if not args.smoke:
-        print("полный прогон — на этапе T2 (пока доступен только --smoke)")
-        return 2
+        print(f"written: {run_t2_full(cfg, force=args.force)}")
+        return 0
     print(f"written (smoke): {run_t2_smoke(cfg, force=args.force)}")
+    return 0
+
+
+def _cmd_t2_experiment(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded, default_grid, run_experiments
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        run_experiments(
+            cfg, default_grid(), out / "t2_experiments.csv", out / "t2_per_class.csv", args.limit
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_experiments.csv'}, {out / 't2_per_class.csv'}")
+    return 0
+
+
+def _cmd_t2_tune(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_tune
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        summary = run_tune(
+            cfg, out / "t2_experiments.csv", out / "t2_per_class.csv", out / "t2_tune_summary.json"
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_tune_summary.json'}; финалист {summary['finalist']}")
+    return 0
+
+
+def _cmd_t2_tune2(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_tune_c_and_header
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        s = run_tune_c_and_header(
+            cfg,
+            out / "t2_experiments.csv",
+            out / "t2_per_class.csv",
+            out / "t2_tune2_summary.json",
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_tune2_summary.json'}; выбран {s['chosen']}")
+    return 0
+
+
+def _cmd_t2_stability(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_date_stability
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        run_date_stability(
+            cfg,
+            out / "t2_experiments.csv",
+            out / "t2_per_class.csv",
+            out / "t2_stability_summary.json",
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_stability_summary.json'}")
+    return 0
+
+
+def _cmd_t2_swapdate(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_swap_date_eval
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        run_swap_date_eval(
+            cfg,
+            out / "t2_experiments.csv",
+            out / "t2_per_class.csv",
+            out / "t2_swapdate_summary.json",
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_swapdate_summary.json'}")
     return 0
 
 
@@ -118,6 +211,27 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--smoke", action="store_true")
         p.add_argument("--force", action="store_true")
         p.set_defaults(func=func)
+
+    p = t2.add_parser("experiment")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.add_argument("--limit", type=int, default=None, help="первые N строк train (отладка)")
+    p.set_defaults(func=_cmd_t2_experiment)
+
+    p = t2.add_parser("tune")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_tune)
+
+    p = t2.add_parser("tune2")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_tune2)
+
+    p = t2.add_parser("stability")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_stability)
+
+    p = t2.add_parser("swapdate")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_swapdate)
 
     p = sub.add_parser("validate")
     p.add_argument("task", choices=["t1", "t2"])

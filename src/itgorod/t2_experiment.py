@@ -5,6 +5,7 @@
 """
 
 import dataclasses
+import json
 import resource
 import time
 from dataclasses import dataclass
@@ -200,14 +201,19 @@ def run_experiments(
     log=print,
     scheme_names: tuple[str, ...] = ("main", "control"),
     append: bool = False,
+    extra_schemes: dict[str, np.ndarray] | None = None,
 ) -> pd.DataFrame:
-    """`scheme_names` — какие схемы считать; `append` — дописать к существующим CSV
-    (строки с теми же id заменяются)."""
+    """`scheme_names` — какие схемы считать; `append` — дописать к существующим CSV (строки с
+    теми же id сливаются: новые значения заменяют старые, остальные колонки сохраняются).
+    `extra_schemes` — дополнительные схемы фолдов по строкам (имя → массив номеров фолдов),
+    считаются, если имя есть в `scheme_names`. Одинаковые id в сетке считаются один раз."""
+    grid = list({e.id: e for e in grid}.values())  # одинаковые id считаются один раз
     meta = load_meta(cfg)
     if limit:
         meta = meta.iloc[:limit].reset_index(drop=True)
     y = meta["code"].to_numpy()
-    schemes = {k: v for k, v in make_schemes(meta, cfg.seed).items() if k in scheme_names}
+    all_schemes = {**make_schemes(meta, cfg.seed), **(extra_schemes or {})}
+    schemes = {k: v for k, v in all_schemes.items() if k in scheme_names}
     for name, f in schemes.items():
         sizes = np.bincount(group_ids(meta["body_hash"], meta["org_norm"]))
         log(
@@ -227,7 +233,7 @@ def run_experiments(
         secs = {e.id: 0.0 for e in exps}
         not_converged = {(e.id, s): 0 for e in exps for s in schemes}
         for scheme, folds in schemes.items():
-            for k in range(N_SPLITS):
+            for k in np.unique(folds):
                 va = np.flatnonzero(folds == k)
                 tr = np.flatnonzero(folds != k)
                 t0 = time.time()
@@ -265,7 +271,7 @@ def run_experiments(
                 rep = oof_report(y, p, seen[scheme])
                 fold_f1 = [
                     oof_report(y[folds == k], p[folds == k], seen[scheme][folds == k])["macro_f1"]
-                    for k in range(N_SPLITS)
+                    for k in np.unique(folds)
                 ]
                 row.update(
                     {
@@ -274,6 +280,7 @@ def run_experiments(
                         else "",
                         f"{scheme}_macro_f1": round(rep["macro_f1"], 4),
                         f"{scheme}_fold_std": round(float(np.std(fold_f1)), 4),
+                        f"{scheme}_fold_f1": json.dumps([round(float(x), 4) for x in fold_f1]),
                         f"{scheme}_f1_seen": round(rep["macro_f1_seen"], 4),
                         f"{scheme}_f1_unseen": round(rep["macro_f1_unseen"], 4),
                         f"{scheme}_f1_rare": round(rep["macro_f1_rare"], 4),
@@ -294,8 +301,11 @@ def _write(out_csv: Path, per_class_csv: Path, rows: list, per_class: list, appe
     pc = pd.concat(per_class, ignore_index=True)
     if append and out_csv.exists():
         old = pd.read_csv(out_csv)
-        old = old[~old["id"].isin(result["id"])]
-        result = pd.concat([old, result], ignore_index=True)
+        # слияние по id: новые значения заменяют старые, колонки других схем сохраняются
+        order = list(old["id"]) + [i for i in result["id"] if i not in set(old["id"])]
+        result = result.drop_duplicates("id", keep="last")
+        merged = result.set_index("id").combine_first(old.set_index("id"))
+        result = merged.loc[order].reset_index()
         result = result.fillna(
             {"tail_chars": 0, "strip_header": False, "C": 0.5, "header_mode": ""}
         )

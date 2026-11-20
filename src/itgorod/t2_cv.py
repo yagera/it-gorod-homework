@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import f1_score, precision_recall_fscore_support
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedKFold
 
-from itgorod.t2_recon import body_hash, parse_header
+from itgorod.t2_recon import body_hash, parse_header, split_header
 
 _PUNCT_RE = re.compile(r"[^\w\s]|_")
 
@@ -139,3 +139,26 @@ def oof_report(
         else float("nan"),
         "per_class": per_class,
     }
+
+
+def fetch_dates(texts: Sequence[str]) -> list[str | None]:
+    """Дата выгрузки (`DD.MM.YYYY` перед «Текст документа») каждого документа или None."""
+    return [split_header(t)["fetch_date"] for t in texts]
+
+
+def date_group_folds(fetch: Sequence, body_hashes: Sequence, n_groups: int = 4) -> np.ndarray:
+    """Группы по дате выгрузки для проверки стабильности: хронологические квантильные
+    группы из целых дат (дата не делится между группами; группа определяется положением
+    середины даты в кумулятивной доле строк). Строки без даты — в последнюю группу;
+    точные дубли тела — в фолд первой копии (поэтому дата может оказаться разделённой между
+    группами в единичных строках)."""
+    dates = pd.to_datetime(pd.Series(list(fetch)), format="%d.%m.%Y", errors="coerce")
+    counts = dates.dropna().value_counts().sort_index()
+    total = counts.sum()
+    mid = (counts.cumsum() - counts / 2) / total
+    group_of = {d: min(n_groups - 1, int(m * n_groups)) for d, m in mid.items()}
+    folds = np.array([group_of.get(d, n_groups - 1) for d in dates], dtype=int)
+    first: dict = {}
+    for i, h in enumerate(body_hashes):
+        folds[i] = folds[first.setdefault(h, i)]
+    return folds

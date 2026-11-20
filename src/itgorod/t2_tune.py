@@ -10,13 +10,16 @@ import dataclasses
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from itgorod.config import T2Config
+from itgorod.t2_cv import date_group_folds, fetch_dates
 from itgorod.t2_experiment import (
     Experiment,
     header_parse_rate,
     load_meta,
+    load_train,
     run_experiments,
 )
 
@@ -279,6 +282,126 @@ def run_tune_c_and_header(
         "ablation": ablation,
         "parse_rate": header_parse_rate(cfg),
         "note": "выбор C по той же CV, оценка оптимистична; абляция — разрез тех же данных",
+    }
+    summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float))
+    return summary
+
+
+def class_group_spread(y, folds) -> dict:
+    """Насколько классы разнесены по группам: классы в одной группе, в нескольких, и доля
+    строк, чей класс отсутствует в train-части своего фолда."""
+    y, folds = np.asarray(y), np.asarray(folds)
+    groups = pd.Series(folds).groupby(y).nunique()
+    multi = sorted(groups[groups > 1].index)
+    absent_rows = 0
+    for k in np.unique(folds):
+        absent_rows += int((~np.isin(y[folds == k], y[folds != k])).sum())
+    return {
+        "n_single_group": int((groups == 1).sum()),
+        "n_multi_group": len(multi),
+        "multi_group_classes": multi,
+        "rows_share_class_absent_from_train_part": round(absent_rows / len(y), 4),
+    }
+
+
+def mean_f1_on_classes(pc: pd.DataFrame, id_: str, scheme: str, classes: list[str]) -> float:
+    """Средний F1 (по OOF) выбранных классов для эксперимента и схемы."""
+    x = pc[(pc["id"] == id_) & (pc["scheme"] == scheme) & pc["code"].isin(classes)]
+    return float(x["f1"].mean())
+
+
+def stability_grid(c: float = 1.0) -> list[Experiment]:
+    """Финалист (с шапкой), «только номер и даты» и «без номера и дат» (тело без шапки + часть)."""
+    return [
+        Experiment("svc", "none", 2000, C=c),
+        Experiment("svc", "none", 2000, strip_header=True, C=c, header_mode="only_numdates"),
+        Experiment("svc", "none", 2000, strip_header=True, C=c, header_mode="no_numdates"),
+    ]
+
+
+def run_date_stability(
+    cfg: T2Config,
+    out_csv: Path,
+    per_class_csv: Path,
+    summary_json: Path,
+    log=print,
+    exps: list[Experiment] | None = None,
+    fetch=None,
+    n_groups: int = 4,
+) -> dict:
+    """Проверка стабильности: группы по дате выгрузки (квантили), обучение на одних группах,
+    оценка на другой (group k-fold). Только оценка — сабмишн не пишется. Сравнивается с
+    основной (main) и контрольной (control) схемами из CSV."""
+    exps = stability_grid() if exps is None else exps
+    meta = load_meta(cfg)
+    if fetch is None:
+        fetch = fetch_dates(load_train(cfg, 2000)["text"].tolist())
+    if len(fetch) != len(meta):
+        raise ValueError(f"даты выгрузки ({len(fetch)}) и мета ({len(meta)}) не совпадают по длине")
+    folds = date_group_folds(fetch, meta["body_hash"].tolist(), n_groups)
+    y = meta["code"].to_numpy()
+    sizes = np.bincount(folds, minlength=n_groups).tolist()
+    log(f"группы по дате выгрузки: размеры {sizes}")
+
+    have = _rows(out_csv) if out_csv.exists() else {}
+    need = [
+        e
+        for e in exps
+        if e.id not in have
+        or have[e.id].get("n_rows") != len(meta)
+        or pd.isna(have[e.id].get("date_macro_f1"))
+    ]
+    if need:
+        run_experiments(
+            cfg,
+            need,
+            out_csv,
+            per_class_csv,
+            log=log,
+            scheme_names=("date",),
+            append=True,
+            extra_schemes={"date": folds},
+        )
+    rows = _rows(out_csv)
+    absent = {}
+    for k in range(n_groups):
+        tr_classes = set(y[folds != k])
+        miss = sorted(set(y[folds == k]) - tr_classes)
+        absent[k] = {"classes": miss, "rows": int(np.isin(y[folds == k], miss).sum())}
+    variants = {}
+    for e in exps:
+        r = rows[e.id]
+        variants[e.id] = {
+            "date_macro_f1": r["date_macro_f1"],
+            "date_fold_std": r["date_fold_std"],
+            "date_f1_rare": r["date_f1_rare"],
+            "main_macro_f1": r.get("main_macro_f1"),
+            "control_macro_f1": r.get("control_macro_f1"),
+            "main_f1_rare": r.get("main_f1_rare"),
+            "fold_f1": json.loads(r["date_fold_f1"]),
+            "absent_classes_by_fold": absent,
+        }
+    spread = class_group_spread(y, folds)
+    pcdf = pd.read_csv(per_class_csv, dtype={"code": str})
+    multi = spread["multi_group_classes"]
+    for e in exps:
+        v = variants[e.id]
+        v["mean_f1_multi_group_classes_date"] = round(
+            mean_f1_on_classes(pcdf, e.id, "date", multi), 4
+        )
+        has_main = ((pcdf["id"] == e.id) & (pcdf["scheme"] == "main")).any()
+        v["mean_f1_multi_group_classes_main"] = (
+            round(mean_f1_on_classes(pcdf, e.id, "main", multi), 4) if has_main else None
+        )
+    summary = {
+        "class_spread": spread,
+        "groups": {
+            "n_groups": n_groups,
+            "sizes": sizes,
+            "rule": "хронологические квантильные группы из целых дат",
+        },
+        "variants": variants,
+        "note": "только оценка; сабмишн не менялся",
     }
     summary_json.write_text(json.dumps(summary, ensure_ascii=False, indent=1, default=float))
     return summary

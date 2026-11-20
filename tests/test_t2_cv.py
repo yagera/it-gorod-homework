@@ -125,3 +125,45 @@ def test_fit_fold_features_fit_only_on_train():
     assert SpyVec.fit_docs == train
     assert "уникальноеслово" not in vec.vocabulary_
     assert xtr.shape[0] == 3 and xva.shape[0] == 1 and xtr.shape[1] == xva.shape[1]
+
+
+# ---- группы по дате выгрузки (проверка стабильности) ----
+
+
+def test_fetch_dates_extraction():
+    from itgorod.t2_cv import fetch_dates
+
+    texts = [
+        "РЕШЕНИЕ от 01.02.2025 № 1 Орган 20.01.2026 Текст документа тело",
+        "без шапки",
+        "ПОСТАНОВЛЕНИЕ от 03.04.2025 № 2 Орган 02.02.2026 Текст документа тело",
+    ]
+    assert fetch_dates(texts) == ["20.01.2026", None, "02.02.2026"]
+
+
+def test_date_group_folds_quantile_contiguous_and_whole_dates():
+    from itgorod.t2_cv import date_group_folds
+
+    # 8 дат по 10 строк: хронологические группы из целых дат, ~по 2 даты
+    dates = [f"{d:02d}.01.2026" for d in range(19, 27)]
+    fetch = [d for d in dates for _ in range(10)]
+    bodies = [f"b{i}" for i in range(80)]
+    f = date_group_folds(fetch, bodies, n_groups=4)
+    assert sorted(set(f)) == [0, 1, 2, 3]
+    for d in dates:  # дата целиком в одной группе
+        assert len({f[i] for i, x in enumerate(fetch) if x == d}) == 1
+    order = [f[fetch.index(d)] for d in dates]
+    assert order == sorted(order)  # группы идут по времени
+    assert all(15 <= (f == k).sum() <= 25 for k in range(4))  # квантили, ~25%
+
+
+def test_date_group_folds_missing_dates_and_duplicates():
+    from itgorod.t2_cv import date_group_folds
+
+    dates = [f"{d:02d}.01.2026" for d in range(19, 23) for _ in range(10)] + [None, None]
+    bodies = [f"b{i}" for i in range(42)]
+    bodies[41] = bodies[0]  # дубль тела: строка без даты должна уйти в фолд первой копии
+    f = date_group_folds(dates, bodies, n_groups=4)
+    assert len(f) == 42 and set(f) <= {0, 1, 2, 3}
+    assert f[40] == 3  # без даты → последняя группа
+    assert f[41] == f[0]  # дубль тела уходит в фолд первой копии, даже без даты

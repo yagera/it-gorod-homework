@@ -14,6 +14,7 @@ from sklearn.metrics import f1_score
 
 from itgorod.config import REPO_ROOT, load_t2_config
 from itgorod.data import build_t2_cache
+from itgorod.t2_cv import date_group_folds
 from itgorod.t2_experiment import load_meta, load_train, make_schemes
 from itgorod.t2_recon import split_header
 
@@ -72,3 +73,28 @@ print(
     "макс. расхождение доли по дате, п.п.:",
     round(((share.train - share.test).abs() * 100).max(), 2),
 )
+
+
+# %% [markdown]
+# ## Концентрация классов по группам дат выгрузки
+# Те же 4 хронологические квантильные группы из целых дат, что в `itgorod t2 stability`.
+# Доля строк класса в самой крупной для него группе; мода класса по каждой дате выгрузки.
+
+# %%
+groups = date_group_folds(
+    fetch(head).where(fetch(head) != "NA", None).tolist(), meta.body_hash.tolist(), 4
+)
+crosstab = pd.crosstab(meta.code, groups)
+conc = crosstab.max(axis=1) / crosstab.sum(axis=1)
+print("классов:", len(conc), "| в одной группе:", int((crosstab.gt(0).sum(axis=1) == 1).sum()))
+print(
+    "классов с долей строк в одной группе >= 95%:",
+    int((conc >= 0.95).sum()),
+    ">= 99%:",
+    int((conc >= 0.99).sum()),
+)
+by_date = pd.DataFrame({"d": fetch(head).to_numpy(), "y": meta.code.to_numpy()})
+top = by_date.groupby("d").y.agg(
+    lambda s: (s.value_counts().index[0], round(s.value_counts(normalize=True).iloc[0], 2), len(s))
+)
+print(top.to_string())

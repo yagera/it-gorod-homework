@@ -265,3 +265,68 @@ def test_header_parse_rate(tmp_path):
     cfg = _cfg(tmp_path)
     r = te.header_parse_rate(cfg)
     assert r["n"] == 90 and r["parsed"] == 90 and r["share"] == 1.0
+
+
+def test_extra_scheme_folds_and_rule_a(tmp_path, monkeypatch):
+    """Дополнительная схема (группы по дате): число фолдов из массива, fit — только вне фолда."""
+    from spies import Calls, make_spies
+
+    cfg = _cfg(tmp_path)
+    n = 90
+    folds = np.arange(n) % 3  # 3 группы
+    calls = Calls()
+    spy_vec, spy_model = make_spies(calls)
+    monkeypatch.setattr(te, "make_vectorizer", lambda cfg: spy_vec())
+    monkeypatch.setattr(te, "make_model", lambda exp, seed: spy_model())
+    exp = te.Experiment("svc", "none", 5000)
+    res = te.run_experiments(
+        cfg,
+        [exp],
+        tmp_path / "e.csv",
+        tmp_path / "pc.csv",
+        log=lambda *_: None,
+        scheme_names=("date",),
+        extra_schemes={"date": folds},
+    )
+    assert "date_macro_f1" in res.columns and "main_macro_f1" not in res.columns
+    texts = te.load_train(cfg, 5000)["text"].to_numpy()
+    assert len(calls.vec_fits) == len(calls.model_fits) == 3
+    for k, docs in enumerate(calls.vec_fits):
+        assert frozenset(docs) == frozenset(texts[folds != k]) and len(docs) == (folds != k).sum()
+
+
+def test_append_merges_schemes_for_same_id(tmp_path):
+    """Дозапись другой схемы к существующему id не стирает ранее посчитанные колонки."""
+    cfg = _cfg(tmp_path)
+    out, pc = tmp_path / "e.csv", tmp_path / "pc.csv"
+    exp = te.Experiment("svc", "none", 5000)
+    te.run_experiments(cfg, [exp], out, pc, log=lambda *_: None)  # main + control
+    before = pd.read_csv(out).iloc[0]
+    folds = np.arange(90) % 4  # классы циклятся по 3: каждый класс есть в train-части фолда
+    te.run_experiments(
+        cfg,
+        [exp],
+        out,
+        pc,
+        log=lambda *_: None,
+        scheme_names=("date",),
+        extra_schemes={"date": folds},
+        append=True,
+    )
+    after = pd.read_csv(out)
+    assert len(after) == 1
+    row = after.iloc[0]
+    assert row["main_macro_f1"] == before["main_macro_f1"]
+    assert row["control_macro_f1"] == before["control_macro_f1"]
+    assert row["date_macro_f1"] > 0
+    # per-class: строки всех трёх схем на месте
+    assert set(pd.read_csv(pc)["scheme"]) == {"main", "control", "date"}
+
+
+def test_duplicate_ids_in_grid_run_once(tmp_path):
+    cfg = _cfg(tmp_path)
+    e = te.Experiment("svc", "none", 5000, C=2.0)
+    res = te.run_experiments(
+        cfg, [e, e], tmp_path / "e.csv", tmp_path / "pc.csv", log=lambda *_: None
+    )
+    assert len(res) == 1 and len(pd.read_csv(tmp_path / "e.csv")) == 1

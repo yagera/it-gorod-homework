@@ -1,6 +1,7 @@
 import json
 
 import pandas as pd
+import pytest
 
 from itgorod import t2_tune as tt
 from itgorod.t2_experiment import Experiment
@@ -196,3 +197,89 @@ def test_resume_rejects_rows_from_limited_run(tmp_path):
     tt._runner(cfg, out, pc, logs.append)([exp], ("main",))
     assert not any("пропуск" in str(m) for m in logs)  # строка пересчитана
     assert pd.read_csv(out).loc[0, "n_rows"] == 90
+
+
+def test_run_date_stability_synthetic(tmp_path):
+    import numpy as np
+    from test_t2_experiment import _cfg
+
+    cfg = _cfg(tmp_path)
+    out, pc, summ = tmp_path / "e.csv", tmp_path / "pc.csv", tmp_path / "st.json"
+    fetch = [f"{19 + i % 4:02d}.01.2026" for i in range(90)]  # 4 даты → 4 группы
+    base = Experiment("svc", "none", 5000)
+    tt.run_date_stability(
+        cfg, out, pc, summ, log=lambda *_: None, exps=[base], fetch=fetch, n_groups=4
+    )
+    rows = pd.read_csv(out)
+    assert rows.loc[0, "date_macro_f1"] > 0 and "main_macro_f1" not in rows.columns
+    summary = json.loads(summ.read_text())
+    assert summary["groups"]["n_groups"] == 4 and sum(summary["groups"]["sizes"]) == 90
+    v = summary["variants"][base.id]
+    assert set(v) >= {
+        "date_macro_f1",
+        "date_fold_std",
+        "date_f1_rare",
+        "fold_f1",
+        "absent_classes_by_fold",
+    }
+    assert len(v["fold_f1"]) == 4
+    assert np.isclose(sum(summary["groups"]["sizes"]), 90)
+
+
+def test_class_group_spread():
+    import numpy as np
+
+    y = np.array(["a"] * 4 + ["b"] * 4 + ["c"] * 2)
+    folds = np.array([0, 0, 1, 1, 0, 0, 0, 0, 2, 2])  # a в 0 и 1; b только в 0; c только в 2
+    s = tt.class_group_spread(y, folds)
+    assert s["n_single_group"] == 2 and s["n_multi_group"] == 1
+    assert s["multi_group_classes"] == ["a"] and s["rows_share_class_absent_from_train_part"] == 0.6
+    # b (4 строки) отсутствует в train-части своего фолда 0 → 4 строки; c (2) → 2; a есть везде
+
+
+def test_mean_f1_on_classes():
+    pc = pd.DataFrame(
+        {
+            "id": ["x"] * 4,
+            "scheme": ["date", "date", "main", "main"],
+            "code": ["a", "b", "a", "b"],
+            "f1": [0.5, 0.0, 0.9, 0.8],
+        }
+    )
+    assert tt.mean_f1_on_classes(pc, "x", "date", ["a"]) == 0.5
+    assert tt.mean_f1_on_classes(pc, "x", "main", ["a", "b"]) == pytest.approx(0.85)
+
+
+def test_stability_summary_has_class_spread(tmp_path):
+    from test_t2_experiment import _cfg
+
+    cfg = _cfg(tmp_path)
+    out, pc, summ = tmp_path / "e.csv", tmp_path / "pc.csv", tmp_path / "st.json"
+    fetch = [f"{19 + i % 4:02d}.01.2026" for i in range(90)]
+    base = Experiment("svc", "none", 5000)
+    tt.run_date_stability(
+        cfg, out, pc, summ, log=lambda *_: None, exps=[base], fetch=fetch, n_groups=4
+    )
+    s = json.loads(summ.read_text())
+    assert set(s["class_spread"]) >= {
+        "n_single_group",
+        "n_multi_group",
+        "rows_share_class_absent_from_train_part",
+    }
+    assert "mean_f1_multi_group_classes_date" in s["variants"][base.id]
+
+
+def test_date_stability_rejects_length_mismatch(tmp_path):
+    from test_t2_experiment import _cfg
+
+    cfg = _cfg(tmp_path)
+    with pytest.raises(ValueError, match="не совпадают"):
+        tt.run_date_stability(
+            cfg,
+            tmp_path / "e.csv",
+            tmp_path / "pc.csv",
+            tmp_path / "s.json",
+            log=lambda *_: None,
+            exps=[Experiment("svc", "none", 5000)],
+            fetch=["20.01.2026"] * 5,
+        )

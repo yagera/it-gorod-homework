@@ -116,3 +116,83 @@ def test_run_tune_resumes_without_recomputing(tmp_path):
     assert any("пропуск" in str(m) for m in logs)
     assert not any("fold 0:" in str(m) for m in logs)  # ни одного нового fit
     pd.testing.assert_frame_equal(first, pd.read_csv(out))
+
+
+def _c(id_, c, f1):
+    return {"id": id_, "C": c, "main_macro_f1": f1, "main_fold_std": 0.008}
+
+
+def test_pick_smallest_within_sigma():
+    rows = [_c("a", 0.5, 0.829), _c("b", 1, 0.8396), _c("c", 2, 0.8429), _c("d", 4, 0.8440)]
+    # лучший 0.8440; в пределах σ=0.0086: 1 (0.0044), 2, 4 → наименьший C = 1
+    assert tt.pick_smallest_within_sigma(rows, 0.0086)["C"] == 1
+    # на границе σ включительно
+    assert tt.pick_smallest_within_sigma([_c("a", 1, 0.8354), _c("b", 2, 0.844)], 0.0086)["C"] == 1
+    # если выше лучшего больше чем на σ — только он сам
+    assert tt.pick_smallest_within_sigma([_c("a", 1, 0.80), _c("b", 8, 0.85)], 0.0086)["C"] == 8
+
+
+def test_big_drops():
+    pc = pd.DataFrame(
+        {
+            "id": ["ref"] * 3 + ["var"] * 3 + ["ref"] * 3 + ["var"] * 3,
+            "scheme": ["main"] * 6 + ["control"] * 6,
+            "code": ["010.000.000", "020.000.000", "030.000.000"] * 4,
+            "f1": [0.9, 0.8, 0.7, 0.7, 0.79, 0.5, 0.9, 0.8, 0.7, 0.9, 0.8, 0.7],
+        }
+    )
+    d = tt.big_drops(pc, "ref", "var", "main", 0.10)
+    assert d == {"010.000.000": -0.2, "030.000.000": -0.2}
+    assert tt.big_drops(pc, "ref", "var", "control", 0.10) == {}
+
+
+def test_ablation_grid():
+    g = tt.ablation_grid(Experiment("svc", "none", 2000, C=4.0))
+    modes = [e.header_mode for e in g]
+    assert modes == [
+        "",
+        "full",
+        "only_type",
+        "only_org",
+        "only_numdates",
+        "no_type",
+        "no_org",
+        "no_numdates",
+    ]
+    assert all(e.strip_header and e.C == 4.0 and e.max_chars == 2000 for e in g)
+
+
+def test_run_tune_c_and_header_synthetic(tmp_path):
+    from test_t2_experiment import _cfg
+
+    cfg = _cfg(tmp_path)
+    out, pc, summ = tmp_path / "e.csv", tmp_path / "pc.csv", tmp_path / "s2.json"
+    base = Experiment("svc", "none", 5000)
+    res = tt.run_tune_c_and_header(
+        cfg, out, pc, summ, log=lambda *_: None, base=base, extra_cs=(2.0,), sigma=0.0086
+    )
+    rows = pd.read_csv(out)
+    chosen = res["chosen"]
+    assert chosen in set(rows["id"])
+    hdr_ids = rows.loc[rows["id"].str.contains("nohdr"), "id"]
+    assert len(hdr_ids) == 8  # без шапки + full + only×3 + no×3
+    for col in ("main_macro_f1", "control_macro_f1"):
+        assert rows.loc[rows["id"].isin(hdr_ids), col].notna().all()  # абляция в обеих схемах
+    assert set(res) >= {"chosen", "c_candidates", "confirmed", "ablation", "parse_rate", "note"}
+
+
+def test_resume_rejects_rows_from_limited_run(tmp_path):
+    from test_t2_experiment import _cfg
+
+    cfg = _cfg(tmp_path)
+    out, pc = tmp_path / "e.csv", tmp_path / "pc.csv"
+    exp = Experiment("svc", "none", 5000)
+    run = tt._runner(cfg, out, pc, lambda *_: None)
+    run([exp], ("main",))
+    df = pd.read_csv(out)
+    df["n_rows"] = 10  # как будто строка от прогона с --limit
+    df.to_csv(out, index=False)
+    logs = []
+    tt._runner(cfg, out, pc, logs.append)([exp], ("main",))
+    assert not any("пропуск" in str(m) for m in logs)  # строка пересчитана
+    assert pd.read_csv(out).loc[0, "n_rows"] == 90

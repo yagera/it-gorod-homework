@@ -29,6 +29,7 @@ from itgorod.t2_cv import (
     oof_report,
     seen_org_mask,
 )
+from itgorod.t2_recon import HEADER_PARTS, header_part_text, split_header
 
 N_SPLITS = 5
 
@@ -58,18 +59,22 @@ class Experiment:
     tail_chars: int = 0  # >0: «голова + хвост» (max_chars первых + tail_chars последних)
     strip_header: bool = False  # без шапки до «Текст документа»
     C: float = 0.5  # только LinearSVC
+    # абляция шапки: перед телом (без шапки, `strip_header=True`) ставятся только выбранные части
+    # шапки — only_<часть> | no_<часть> | full, части: type, org, numdates (см. `t2_recon`)
+    header_mode: str = ""
 
     @property
-    def variant(self) -> tuple[int, int, bool]:
+    def variant(self) -> tuple[int, int, bool, str]:
         """Вариант текста: признаки считаются один раз на (вариант, схема, фолд)."""
-        return (self.max_chars, self.tail_chars, self.strip_header)
+        return (self.max_chars, self.tail_chars, self.strip_header, self.header_mode)
 
     @property
     def id(self) -> str:
         tail = f"-t{self.tail_chars}" if self.tail_chars else ""
         hdr = "-nohdr" if self.strip_header else ""
         c = f"-C{self.C:g}" if self.C != 0.5 else ""
-        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}{tail}{hdr}{c}"
+        mode = f"-hdr-{self.header_mode}" if self.header_mode else ""
+        return f"t2-{self.model}-{self.class_weight}-c{self.max_chars}{tail}{hdr}{c}{mode}"
 
 
 def default_grid() -> list[Experiment]:
@@ -131,6 +136,42 @@ def load_train(
     return pd.read_parquet(build_t2_cache(variant, "train", smoke=False))
 
 
+def header_mode_parts(mode: str) -> tuple[str, ...]:
+    """Какие части шапки остаются: `only_X`, `no_X` или `full`."""
+    if mode == "full":
+        return HEADER_PARTS
+    kind, _, part = mode.partition("_")
+    if kind == "only" and part in HEADER_PARTS:
+        return (part,)
+    if kind == "no" and part in HEADER_PARTS:
+        return tuple(p for p in HEADER_PARTS if p != part)
+    raise ValueError(f"неизвестный режим шапки: {mode!r}")
+
+
+def load_variant_texts(cfg: T2Config, exp: Experiment) -> np.ndarray:
+    """Тексты варианта. Без `header_mode` — как раньше; иначе тело (без шапки, окно
+    `max_chars`) с префиксом из выбранных частей шапки, разобранной из исходного текста
+    документа. Разбор детерминирован по самому документу (ничего не обучается)."""
+    if not exp.header_mode:
+        return load_train(cfg, *exp.variant[:3])["text"].to_numpy()
+    parts = header_mode_parts(exp.header_mode)
+    body = load_train(cfg, exp.max_chars, exp.tail_chars, True)["text"].to_numpy()
+    head = load_train(cfg, exp.max_chars, 0, False)["text"].to_numpy()
+    out = np.empty(len(body), dtype=object)
+    for i, (h, b) in enumerate(zip(head, body, strict=True)):
+        hdr = split_header(h)
+        prefix = " ".join(t for t in (header_part_text(hdr, p) for p in parts) if t)
+        out[i] = f"{prefix} {b}" if prefix else b
+    return out
+
+
+def header_parse_rate(cfg: T2Config) -> dict:
+    """Доля документов train, у которых шапка разобрана полностью (по кэшу `max_chars`=2000)."""
+    head = load_train(cfg, 2000)["text"].to_numpy()
+    parsed = sum(split_header(t)["parsed"] for t in head)
+    return {"n": len(head), "parsed": int(parsed), "share": parsed / len(head)}
+
+
 def load_meta(cfg: T2Config) -> pd.DataFrame:
     """code, org_norm, body_hash; кэшируется (орган и хеш не зависят от grid max_chars)."""
     path = cfg.paths.processed_dir / f"t2_meta_c{META_MAX_CHARS}.parquet"
@@ -179,9 +220,7 @@ def run_experiments(
     rows, per_class = [], []
     for variant in dict.fromkeys(e.variant for e in grid):
         exps = [e for e in grid if e.variant == variant]
-        frame = load_train(cfg, *variant)
-        texts = frame["text"].to_numpy()
-        del frame
+        texts = load_variant_texts(cfg, exps[0])
         if limit:
             texts = texts[:limit]
         preds = {(e.id, s): np.empty(len(y), dtype=object) for e in exps for s in schemes}
@@ -216,6 +255,7 @@ def run_experiments(
                 "tail_chars": e.tail_chars,
                 "strip_header": e.strip_header,
                 "C": e.C,
+                "header_mode": e.header_mode,
                 "seconds": round(secs[e.id]),
                 "peak_rss_mb": round(peak_rss_mb()),
                 "n_rows": len(y),
@@ -256,7 +296,9 @@ def _write(out_csv: Path, per_class_csv: Path, rows: list, per_class: list, appe
         old = pd.read_csv(out_csv)
         old = old[~old["id"].isin(result["id"])]
         result = pd.concat([old, result], ignore_index=True)
-        result = result.fillna({"tail_chars": 0, "strip_header": False, "C": 0.5})
+        result = result.fillna(
+            {"tail_chars": 0, "strip_header": False, "C": 0.5, "header_mode": ""}
+        )
         result = result.astype({"tail_chars": int, "strip_header": bool})
     if append and per_class_csv.exists():
         old_pc = pd.read_csv(per_class_csv, dtype={"code": str})

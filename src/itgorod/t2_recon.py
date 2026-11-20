@@ -209,3 +209,45 @@ def time_split_report(train_dates: pd.Series, test_dates: pd.Series) -> dict:
         "train_q05_q50_q95": [str(tr.quantile(q).date()) for q in (0.05, 0.5, 0.95)],
         "test_q05_q50_q95": [str(te.quantile(q).date()) for q in (0.05, 0.5, 0.95)],
     }
+
+
+def split_header(text: str) -> dict:
+    """Шапка по частям (строки как в тексте): `type`, `act_date`, `number`, `org`, `fetch_date`;
+    формат `ТИП от DD.MM.YYYY № N <орган> DD.MM.YYYY Текст документа`. `parsed` — найдены все
+    части; что не найдено — None."""
+    m = HEADER_RE.match(text)
+    f = FETCH_RE.search(text[:1000])
+    org = None
+    if m and f and f.start() >= m.end():
+        org = text[m.end() : f.start()].strip() or None
+    out = {
+        "type": m.group("type").strip() if m else None,
+        "act_date": m.group("act") if m else None,
+        "number": m.group("num") if m else None,
+        "org": org,
+        "fetch_date": f.group("fetch") if f else None,
+    }
+    out["parsed"] = all(v is not None for v in out.values())
+    return out
+
+
+HEADER_PARTS = ("type", "org", "numdates")
+
+
+def header_part_text(h: dict, part: str) -> str:
+    """Текст одной части шапки: `type` (тип акта), `org` (орган), `numdates` (дата акта,
+    номер, дата выгрузки). Нет данных → пустая строка."""
+    if part == "type":
+        return h["type"] or ""
+    if part == "org":
+        return h["org"] or ""
+    if part == "numdates":
+        pieces = []
+        if h["act_date"]:
+            pieces.append(f"от {h['act_date']}")
+        if h["number"]:
+            pieces.append(f"№ {h['number']}")
+        if h["fetch_date"]:
+            pieces.append(h["fetch_date"])
+        return " ".join(pieces)
+    raise ValueError(part)

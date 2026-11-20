@@ -84,6 +84,26 @@ def _cmd_t2_tune(args) -> int:
     return 0
 
 
+def _cmd_t2_tune2(args) -> int:
+    from itgorod.t2_experiment import MemoryLimitExceeded
+    from itgorod.t2_tune import run_tune_c_and_header
+
+    cfg = load_t2_config(args.config)
+    out = REPO_ROOT / "outputs"
+    try:
+        s = run_tune_c_and_header(
+            cfg,
+            out / "t2_experiments.csv",
+            out / "t2_per_class.csv",
+            out / "t2_tune2_summary.json",
+        )
+    except MemoryLimitExceeded as exc:
+        print(f"STOP: {exc}")
+        return 3
+    print(f"written: {out / 't2_tune2_summary.json'}; выбран {s['chosen']}")
+    return 0
+
+
 def _cmd_validate(args) -> int:
     try:
         return _validate(args)
@@ -160,6 +180,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = t2.add_parser("tune")
     p.add_argument("--config", default="configs/t2.yaml")
     p.set_defaults(func=_cmd_t2_tune)
+
+    p = t2.add_parser("tune2")
+    p.add_argument("--config", default="configs/t2.yaml")
+    p.set_defaults(func=_cmd_t2_tune2)
 
     p = sub.add_parser("validate")
     p.add_argument("task", choices=["t1", "t2"])

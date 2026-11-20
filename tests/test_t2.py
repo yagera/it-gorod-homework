@@ -129,3 +129,18 @@ def test_t2_smoke_reproducible(tmp_path, t2_parquets):
     first = cfg.paths.smoke_output.read_bytes()
     run_t2_smoke(cfg, force=True)
     assert cfg.paths.smoke_output.read_bytes() == first
+
+
+def test_t2_full_uses_finalist_config(tmp_path, monkeypatch):
+    """Сабмишн обучается ровно на конфиге финалиста настройки (LinearSVC, C=1, 2000 символов)
+    и берёт векторайзер из общей фабрики — связка с экспериментами закреплена тестом."""
+    from itgorod import t2 as t2_mod
+    from itgorod.t2_experiment import Experiment
+
+    got = []
+    real = t2_mod.make_model
+    monkeypatch.setattr(t2_mod, "make_model", lambda exp, seed: got.append(exp) or real(exp, seed))
+    train_p, test_p, _ = _unique_parquets(tmp_path)
+    run_t2_full(_cfg(tmp_path, train_p, test_p))
+    assert got == [Experiment("svc", "none", 2000, C=1.0)]
+    assert t2_mod.FULL_EXPERIMENT == got[0] and t2_mod.FULL_EXPERIMENT.id == "t2-svc-none-c2000-C1"

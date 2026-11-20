@@ -38,21 +38,24 @@ def run_t2_smoke(cfg: T2Config, force: bool = False) -> Path:
     return cfg.paths.smoke_output
 
 
-FULL_MAX_CHARS = 2000  # лучший бейзлайн по записи 14 (LinearSVC без весов, 2000 символов)
+FULL_MAX_CHARS = 2000
+# финалист настройки (записи 16, 17): LinearSVC без весов, 2000 символов, C=1 — наименьший C
+# в пределах σ от лучшего; фабрики признаков и модели общие с экспериментами
+FULL_EXPERIMENT = Experiment("svc", "none", FULL_MAX_CHARS, C=1.0)
 
 
 def run_t2_full(cfg: T2Config, force: bool = False) -> Path:
-    """Страховочный сабмишн: LinearSVC без весов, word 30k + char 50k, `max_chars=2000`.
+    """Сабмишн финалиста: LinearSVC без весов (C=1), word 30k + char 50k, `max_chars=2000`.
     Векторайзер и модель обучаются на всём train; test только `transform`/`predict`."""
     set_seed(cfg.seed)
-    full = dataclasses.replace(cfg, max_chars=FULL_MAX_CHARS)
+    full = dataclasses.replace(
+        cfg, max_chars=FULL_MAX_CHARS, tail_chars=0, strip_header=False
+    )  # как в эксперименте финалиста
     train = pd.read_parquet(build_t2_cache(full, "train", smoke=False, force=force))
     test = pd.read_parquet(build_t2_cache(full, "test", smoke=False, force=force))
     vec = make_vectorizer(cfg)
     x_train = vec.fit_transform(train["text"])
-    model = make_model(Experiment("svc", "none", FULL_MAX_CHARS), cfg.seed).fit(
-        x_train, train["code"]
-    )
+    model = make_model(FULL_EXPERIMENT, cfg.seed).fit(x_train, train["code"])
     pred = pd.DataFrame(
         {
             "row_id": test["row_id"].astype(str),

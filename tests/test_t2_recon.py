@@ -8,6 +8,7 @@ from itgorod.t2_recon import (
     duplicate_report,
     head_hash,
     header_frame,
+    header_part_text,
     hierarchy_summary,
     leading_code,
     leading_code_report,
@@ -15,6 +16,7 @@ from itgorod.t2_recon import (
     org_overlap,
     parent_codes,
     parse_header,
+    split_header,
     time_split_report,
 )
 
@@ -143,3 +145,76 @@ def test_length_quantiles_and_empty_dates():
 def test_duplicate_report_test_unique():
     r = duplicate_report(pd.Series(["a"]), pd.Series(["x"]), pd.Series(["b", "b", "c"]))
     assert r["test_unique_hashes"] == 2
+
+
+# ---- разбор шапки по частям (образцы формата реальных документов, только шапки) ----
+
+REAL_HEADERS = [
+    (
+        "ПОСТАНОВЛЕНИЕ от 05.06.2025 № 125 Администрация поселка Коренево Кореневского района "
+        "Курской области 27.01.2026 Текст документа ﻿ Постановление Администрации Курской",
+        (
+            "ПОСТАНОВЛЕНИЕ",
+            "05.06.2025",
+            "125",
+            "Администрация поселка Коренево Кореневского района Курской области",
+            "27.01.2026",
+        ),
+    ),
+    (
+        "РЕШЕНИЕ от 17.04.2025 № 48/1 Совет депутатов муниципального округа Гагаринский в "
+        "городе Москве 21.01.2026 Текст документа ﻿ Решение Совета",
+        (
+            "РЕШЕНИЕ",
+            "17.04.2025",
+            "48/1",
+            "Совет депутатов муниципального округа Гагаринский в городе Москве",
+            "21.01.2026",
+        ),
+    ),
+    (
+        "ПОСТАНОВЛЕНИЕ от 05.08.2025 № 904-па Администрация Николаевского муниципального "
+        "района Хабаровского края 29.01.2026 Текст документа ﻿ АДМИНИСТРАЦИЯ",
+        (
+            "ПОСТАНОВЛЕНИЕ",
+            "05.08.2025",
+            "904-па",
+            "Администрация Николаевского муниципального района Хабаровского края",
+            "29.01.2026",
+        ),
+    ),
+    (
+        "МУНИЦИПАЛЬНЫЙ ПРАВОВОЙ АКТ О ВНЕСЕНИИ ИЗМЕНЕНИЙ В УСТАВ МО от 05.08.2025 № 166 "
+        "Собрание представителей сельского поселения Старое Вечканово Самарской области "
+        "20.01.2026 Текст документа ﻿ ГУБЕРНАТОР",
+        (
+            "МУНИЦИПАЛЬНЫЙ ПРАВОВОЙ АКТ О ВНЕСЕНИИ ИЗМЕНЕНИЙ В УСТАВ МО",
+            "05.08.2025",
+            "166",
+            "Собрание представителей сельского поселения Старое Вечканово Самарской области",
+            "20.01.2026",
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize("text,expected", REAL_HEADERS)
+def test_split_header_real_formats(text, expected):
+    h = split_header(text)
+    assert (h["type"], h["act_date"], h["number"], h["org"], h["fetch_date"]) == expected
+    assert h["parsed"] is True
+
+
+def test_split_header_unparsed_and_partial():
+    bad = split_header("без шапки совсем")
+    assert bad["parsed"] is False and all(bad[k] is None for k in ("type", "org", "number"))
+    no_fetch = split_header("РЕШЕНИЕ от 01.02.2025 № 7 Совет без даты выгрузки и без маркера")
+    assert no_fetch["type"] == "РЕШЕНИЕ" and no_fetch["org"] is None and no_fetch["parsed"] is False
+
+
+def test_header_parts_text():
+    h = split_header(REAL_HEADERS[1][0])
+    assert header_part_text(h, "type") == "РЕШЕНИЕ"
+    assert header_part_text(h, "org").startswith("Совет депутатов")
+    assert header_part_text(h, "numdates") == "от 17.04.2025 № 48/1 21.01.2026"
+    assert header_part_text(split_header("мусор"), "org") == ""

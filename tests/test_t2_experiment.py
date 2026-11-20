@@ -110,7 +110,7 @@ def test_experiment_ids_and_variants():
     assert te.Experiment("svc", "none", 2000, strip_header=True).id == "t2-svc-none-c2000-nohdr"
     assert te.Experiment("svc", "none", 2000, C=0.25).id == "t2-svc-none-c2000-C0.25"
     assert (
-        base.variant == (2000, 0, False)
+        base.variant == (2000, 0, False, "")
         and te.Experiment("svc", "none", 2000, C=2).variant == base.variant
     )
     assert te.make_model(te.Experiment("svc", "none", 2000, C=2.0), 42).C == 2.0
@@ -203,3 +203,65 @@ def test_append_to_legacy_csv_without_new_columns(tmp_path):
         0.5,
     )
     assert df["tail_chars"].tolist() == [0, 200] and df["tail_chars"].dtype.kind == "i"
+
+
+# ---- абляция шапки по частям ----
+
+
+def test_header_mode_ids_and_variant():
+    e = te.Experiment("svc", "none", 600, strip_header=True, C=2.0, header_mode="only_org")
+    assert e.id == "t2-svc-none-c600-nohdr-C2-hdr-only_org"
+    assert e.variant != te.Experiment("svc", "none", 600, strip_header=True, C=2.0).variant
+    assert te.header_mode_parts("only_type") == ("type",)
+    assert te.header_mode_parts("no_org") == ("type", "numdates")
+    assert te.header_mode_parts("full") == ("type", "org", "numdates")
+    with pytest.raises(ValueError):
+        te.header_mode_parts("bogus")
+
+
+def test_load_variant_texts_parts(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    def texts(mode):
+        exp = te.Experiment("svc", "none", 600, strip_header=True, header_mode=mode)
+        return te.load_variant_texts(cfg, exp)
+
+    body = te.load_train(cfg, 600, 0, True)["text"].to_numpy()
+    only_org, no_org, only_type, full = (
+        texts("only_org"),
+        texts("no_org"),
+        texts("only_type"),
+        texts("full"),
+    )
+    assert only_org[3] == "Орган 3 " + body[3]
+    assert only_type[3] == "РЕШЕНИЕ " + body[3]
+    assert "Орган 3" not in no_org[3] and no_org[3].startswith(
+        "РЕШЕНИЕ от 01.02.2025 № 3 20.01.2026"
+    )
+    assert full[3].startswith("РЕШЕНИЕ Орган 3 от 01.02.2025 № 3 20.01.2026 ")
+    assert len(full) == len(body) == 90
+
+
+def test_header_variant_fit_only_on_train(tmp_path, monkeypatch):
+    from spies import Calls, make_spies
+
+    cfg = _cfg(tmp_path)
+    calls = Calls()
+    spy_vec, spy_model = make_spies(calls)
+    monkeypatch.setattr(te, "make_vectorizer", lambda cfg: spy_vec())
+    monkeypatch.setattr(te, "make_model", lambda exp, seed: spy_model())
+    exp = te.Experiment("svc", "none", 600, strip_header=True, header_mode="only_org")
+    te.run_experiments(cfg, [exp], tmp_path / "e.csv", tmp_path / "pc.csv", log=lambda *_: None)
+    meta = te.load_meta(cfg)
+    texts = te.load_variant_texts(cfg, exp)
+    schemes = te.make_schemes(meta, cfg.seed)
+    expected = [frozenset(texts[f != k]) for f in schemes.values() for k in range(te.N_SPLITS)]
+    assert len(calls.vec_fits) == len(calls.model_fits) == len(expected)
+    for docs, train_docs in zip(calls.vec_fits, expected, strict=True):
+        assert frozenset(docs) == train_docs
+
+
+def test_header_parse_rate(tmp_path):
+    cfg = _cfg(tmp_path)
+    r = te.header_parse_rate(cfg)
+    assert r["n"] == 90 and r["parsed"] == 90 and r["share"] == 1.0

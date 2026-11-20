@@ -1,4 +1,4 @@
-.PHONY: install lint format test t1 t1-experiment t2-prepare-smoke t2-smoke t2-experiment t2-tune t2-tune2 t2-stability t2-swapdate t2-embed t2-embed-eval t2 validate check-time-split ci
+.PHONY: install lint format test t1 t1-experiment t2-prepare-smoke t2-smoke t2-experiment t2-tune t2-tune2 t2-stability t2-swapdate t2-embed t2-embed-eval t2 validate check-time-split ci submit validate-submit
 
 install:
 	uv sync
@@ -59,3 +59,10 @@ check-time-split:
 	uv run itgorod check-time-split --config configs/t1.yaml
 
 ci: lint test
+
+validate-submit:
+	uv run itgorod validate t1 outputs/task-1.csv
+	uv run itgorod validate t2 outputs/task-2.csv
+
+submit: t1 t2
+	$(MAKE) validate-submit

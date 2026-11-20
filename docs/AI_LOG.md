@@ -222,3 +222,11 @@
 - Файлы: src/itgorod/embeddings.py, t2_embed_eval.py, cli.py, Makefile, notebooks/05_t2_embedding_bench.py, tests/test_embeddings.py, tests/test_t2_embed_eval.py, docs/DECISIONS.md, docs/EXPERIMENTS.md, docs/AI_LOG.md; data/cache/ и outputs/ не в git.
 - Проверка: `make ci` → ruff чисто, 216 passed; `md5sum outputs/task-2.csv` до и после совпадает (6022899a640c…); поиск токена по репозиторию, логам и докам — значений нет; `itgorod t2 embed`, `oof-svc`, `embed-eval` → exit 0.
 - Что исправил человек: TODO(German)
+
+## 2026-11-20 — Финальная проверка и документация (ветка feat/final)
+- Запрос: воспроизведение в чистом клоне, проверка секретов и персональных данных, README, список незаполненных полей, make ci, ревью.
+- Модель/агент: Sonnet; субагент reviewer/Opus.
+- Что сделано: цели `submit` (t1 + t2, затем `validate-submit`) и `validate-submit` в Makefile; README переписан (цель, дедлайн, воспроизведение, структура, итоги, ограничения оценки, решения, где AI_LOG); правки README по замечаниям reviewer. Модели и сабмишны не менялись.
+- Файлы: Makefile, README.md, docs/AI_LOG.md.
+- Проверка: чистый клон с origin + копия data/raw, `uv sync --frozen` + `make submit` → 3:18, пик памяти 2,86 ГБ, md5 task-1.csv и task-2.csv совпали с outputs/ (расхождений нет); `gitleaks detect --log-opts=--all` (26 коммитов) → утечек нет; в отслеживаемых файлах и истории нет data/, outputs/, .env, ключей, абсолютных путей /home/, токенов HF/GitHub; `make ci` → ruff чисто, 216 passed.
+- Что исправил человек: TODO(German)

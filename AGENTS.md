@@ -17,7 +17,9 @@
 `outputs/` (сабмишны, не в git).
 
 Команды Makefile: `make install | lint | format | test | t1 |
-t2-prepare-smoke | t2-smoke | validate | check-time-split | ci`.
+t2-prepare-smoke | t2-smoke | validate | validate-submit | check-time-split | submit | ci`.
+Проверка сдачи (формат `task-1.csv` и `task-2.csv`) — `make validate-submit`; `make submit` = t1 + t2 + validate-submit.
+`make validate` дополнительно проверяет `task-2.smoke.csv` (нужен после `make t2-smoke`).
 
 ## Правила валидации
 - **T1 — только по времени.** Фолды в `configs/t1.yaml` (`split.folds`: ≤2021→2022, ≤2022→2023).
